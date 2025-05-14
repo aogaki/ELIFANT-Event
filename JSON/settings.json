@@ -1,0 +1,10 @@
+{
+    "Directory": "/Users/aogaki/WorkSpace/ELIFANT2025/3He12C/data",
+    "ChannelSettings": "chSettings.json",
+    "TimeSettings": "timeSettings.json",
+    "NumberOfThreads": 0,
+    "RunNumber": 76,
+    "StartVersion": 0,
+    "EndVersion": 173,
+    "TimeWindow": 1000
+}
