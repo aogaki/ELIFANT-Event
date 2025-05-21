@@ -28,11 +28,16 @@ file(GLOB headers ${PROJECT_SOURCE_DIR}/include/*.hpp)
 file(GLOB sources ${PROJECT_SOURCE_DIR}/src/*.cpp)
 
 # Copy config files *.conf to build directory
-file(GLOB conf_files ${PROJECT_SOURCE_DIR}/include/TChSettings.hpp ${PROJECT_SOURCE_DIR}/include/TEventData.hpp ${PROJECT_SOURCE_DIR}/macro/*)
+file(GLOB conf_files ${PROJECT_SOURCE_DIR}/include/ChSettings.hpp ${PROJECT_SOURCE_DIR}/include/EventData.hpp ${PROJECT_SOURCE_DIR}/macro/*)
 file(COPY ${conf_files} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
+# Generating Dictionary for ROOT
+set(MY_LINKDEF ${PROJECT_SOURCE_DIR}/dictionary/LinkDef.h)
+set(MY_DICTIONARY "G__${LIB_NAME}")
+ROOT_GENERATE_DICTIONARY(${MY_DICTIONARY} ${headers} LINKDEF ${MY_LINKDEF})
+
 # ----------------------------------------------------------------------------
-add_library(${LIB_NAME} SHARED ${sources} ${headers})
+add_library(${LIB_NAME} SHARED ${sources} ${headers} "${MY_DICTIONARY}.cxx")
 target_link_libraries(${LIB_NAME} ${ROOT_LIBRARIES} RHTTP)
 
 add_executable(${PROJECT_NAME} main.cpp)

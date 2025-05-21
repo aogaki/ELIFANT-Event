@@ -20,9 +20,7 @@ DELILA::TimeAlignment::~TimeAlignment()
   fDataProcessFlag = false;
   fFileList.clear();
   fChSettingsVec.clear();
-  fIDTable.clear();
-  fTriggerTable.clear();
-  fHistograms.clear();
+  fHistoTime.clear();
 }
 
 void DELILA::TimeAlignment::LoadChSettings(const std::string &fileName)
@@ -32,31 +30,6 @@ void DELILA::TimeAlignment::LoadChSettings(const std::string &fileName)
     std::cerr << "Error: No channel settings found in file: " << fileName
               << std::endl;
     return;
-  }
-
-  fIDTable.resize(fChSettingsVec.size());
-  for (size_t i = 0; i < fChSettingsVec.size(); i++) {
-    fIDTable[i].resize(fChSettingsVec[i].size());
-    for (size_t j = 0; j < fChSettingsVec[i].size(); j++) {
-      fIDTable[i][j] = fChSettingsVec[i][j].ID;
-    }
-  }
-
-  fTriggerTable.resize(fChSettingsVec.size());
-  for (size_t i = 0; i < fChSettingsVec.size(); i++) {
-    fTriggerTable[i].resize(fChSettingsVec[i].size());
-    for (size_t j = 0; j < fChSettingsVec[i].size(); j++) {
-      fTriggerTable[i][j] = fChSettingsVec[i][j].isEventTrigger;
-    }
-  }
-
-  fDetectorTypeTable.resize(fChSettingsVec.size());
-  for (size_t i = 0; i < fChSettingsVec.size(); i++) {
-    fDetectorTypeTable[i].resize(fChSettingsVec[i].size());
-    for (size_t j = 0; j < fChSettingsVec[i].size(); j++) {
-      fDetectorTypeTable[i][j] =
-          ChSettings::GetDetectorType(fChSettingsVec[i][j].detectorType);
-    }
   }
 }
 
@@ -80,15 +53,23 @@ void DELILA::TimeAlignment::InitHistograms()
   }
   maxID += 1;  // Adjust for zero-based indexing
 
-  fHistograms.resize(fChSettingsVec.size());
+  fHistoTime.resize(fChSettingsVec.size());
+  fHistoADC.resize(fChSettingsVec.size());
   for (size_t i = 0; i < fChSettingsVec.size(); i++) {
-    fHistograms[i].resize(fChSettingsVec[i].size());
+    fHistoTime[i].resize(fChSettingsVec[i].size());
+    fHistoADC[i].resize(fChSettingsVec[i].size());
     for (size_t j = 0; j < fChSettingsVec[i].size(); j++) {
       int nBins = 20 * fTimeWindow;
-      TString histName = Form("h_%02zu_%02zu", i, j);
-      fHistograms[i][j] =
+      TString histName = Form("hTime_%02zu_%02zu", i, j);
+      fHistoTime[i][j] =
           std::make_unique<TH2D>(histName, histName, nBins, -fTimeWindow,
                                  fTimeWindow, maxID, 0, maxID);
+
+      histName = Form("hADC_%02zu_%02zu", i, j);
+      fHistoADC[i][j] =
+          std::make_unique<TH1D>(histName, histName, 32000, 0, 32000);
+      fHistoADC[i][j]->SetDirectory(0);
+      fHistoTime[i][j]->SetDirectory(0);
     }
   }
 }
@@ -102,14 +83,27 @@ void DELILA::TimeAlignment::SaveHistograms()
     return;
   }
 
-  for (size_t i = 0; i < fHistograms.size(); i++) {
-    for (size_t j = 0; j < fHistograms[i].size(); j++) {
-      if (!fHistograms[i][j]) {
+  for (size_t i = 0; i < fHistoTime.size(); i++) {
+    for (size_t j = 0; j < fHistoTime[i].size(); j++) {
+      if (!fHistoTime[i][j]) {
         std::cerr << "Error: Histogram not initialized for module " << i
                   << ", channel " << j << std::endl;
         continue;
       }
-      fHistograms[i][j]->Write();
+      if (fHistoTime[i][j]->GetEntries() > 0) {
+        fHistoTime[i][j]->Write();
+      }
+    }
+  }
+
+  for (size_t i = 0; i < fHistoTime.size(); i++) {
+    for (size_t j = 0; j < fHistoTime[i].size(); j++) {
+      if (!fHistoADC[i][j]) {
+        std::cerr << "Error: Histogram not initialized for module " << i
+                  << ", channel " << j << std::endl;
+        continue;
+      }
+      fHistoADC[i][j]->Write();
     }
   }
 
@@ -179,6 +173,10 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
     tree->SetBranchStatus("Ch", kTRUE);
     tree->SetBranchAddress("Ch", &ch);
 
+    UShort_t chargeLong;
+    tree->SetBranchStatus("ChargeLong", kTRUE);
+    tree->SetBranchAddress("ChargeLong", &chargeLong);
+
     Double_t fineTS;
     tree->SetBranchStatus("FineTS", kTRUE);
     tree->SetBranchAddress("FineTS", &fineTS);
@@ -188,6 +186,7 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
     dataVec.reserve(nEvents);
     for (int64_t iEve = 0; iEve < nEvents; iEve++) {
       tree->GetEntry(iEve);
+      fHistoADC[mod][ch]->Fill(chargeLong);
       dataVec.emplace_back(mod, ch, fineTS / 1000.);  // ps -> ns
     }
     file->Close();
@@ -202,7 +201,7 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
       auto ch = std::get<1>(dataVec[iEve]);
       auto fineTS = std::get<2>(dataVec[iEve]);
 
-      if (fTriggerTable[mod][ch]) {
+      if (fChSettingsVec[mod][ch].isEventTrigger) {
         auto time0 = fineTS;
         int origMod = mod;
         int origCh = ch;
@@ -216,7 +215,8 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
           if (timeDiff > fTimeWindow) {
             break;
           }
-          fHistograms[origMod][origCh]->Fill(timeDiff, fIDTable[mod][ch]);
+          fHistoTime[origMod][origCh]->Fill(timeDiff,
+                                            fChSettingsVec[mod][ch].ID);
         }
         for (auto i = iEve - 1; i >= 0; i--) {
           auto mod = std::get<0>(dataVec[i]);
@@ -227,13 +227,10 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
           if (timeDiff < -fTimeWindow) {
             break;
           }
-          fHistograms[origMod][origCh]->Fill(timeDiff, fIDTable[mod][ch]);
+          fHistoTime[origMod][origCh]->Fill(timeDiff,
+                                            fChSettingsVec[mod][ch].ID);
         }
       }
-    }
-    {
-      std::lock_guard<std::mutex> lock(fFileListMutex);
-      std::cout << "Processed file: " << fileName << std::endl;
     }
   }
 
@@ -243,7 +240,7 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
   }
 }
 
-void DELILA::TimeAlignment::CalculateTimeAlignment(const double_t thFactor)
+void DELILA::TimeAlignment::CalculateTimeAlignment()
 {
   TString fileName = kTimeAlignmentFileName;
   auto file = new TFile(fileName, "READ");
@@ -252,15 +249,14 @@ void DELILA::TimeAlignment::CalculateTimeAlignment(const double_t thFactor)
     return;
   }
 
-  std::vector<std::vector<std::vector<std::vector<TimeSettings_t>>>>
-      timeSettingsVec;
+  std::vector<std::vector<std::vector<std::vector<double_t>>>> timeSettingsVec;
 
   timeSettingsVec.resize(fChSettingsVec.size());
   for (auto iMod = 0; iMod < fChSettingsVec.size(); iMod++) {
     timeSettingsVec[iMod].resize(fChSettingsVec[iMod].size());
     for (auto iCh = 0; iCh < fChSettingsVec[iMod].size(); iCh++) {
       // Read the histogram from the file
-      auto histName = Form("h_%02d_%02d", iMod, iCh);
+      auto histName = Form("hTime_%02d_%02d", iMod, iCh);
       auto hist2D = static_cast<TH2D *>(file->Get(histName));
       if (!hist2D) {
         std::cerr << "Error: Could not find histogram: " << histName
@@ -273,7 +269,7 @@ void DELILA::TimeAlignment::CalculateTimeAlignment(const double_t thFactor)
       for (size_t i = 0; i < fChSettingsVec.size(); i++) {
         histVec[i].resize(fChSettingsVec[i].size());
         for (size_t j = 0; j < fChSettingsVec[i].size(); j++) {
-          auto id = fIDTable[i][j];
+          auto id = fChSettingsVec[i][j].ID;
           auto bin = id + 1;
           histVec[i][j] = hist2D->ProjectionX(Form("hpx_%04d", id), bin, bin);
           auto detectorType =
@@ -288,7 +284,7 @@ void DELILA::TimeAlignment::CalculateTimeAlignment(const double_t thFactor)
         }
       }
 
-      std::vector<std::vector<TimeSettings_t>> localVec;
+      std::vector<std::vector<double_t>> localVec;
       localVec.resize(fChSettingsVec.size());
       for (size_t i = 0; i < fChSettingsVec.size(); i++) {
         localVec[i].resize(fChSettingsVec[i].size());
@@ -298,35 +294,11 @@ void DELILA::TimeAlignment::CalculateTimeAlignment(const double_t thFactor)
           auto leftEdge = 0.;
           auto rightEdge = 0.;
           if (hist->GetEntries() > 0) {
-            auto baseLine = 0.;
-            constexpr auto sampleBins = 32;
-            for (auto i = 0; i < sampleBins; i++) {
-              baseLine += hist->GetBinContent(i);
-            }
-            baseLine /= sampleBins;
-
             const auto maxBin = hist->GetMaximumBin();
             const auto maxBinCenter = hist->GetBinCenter(maxBin);
             timeOffset = maxBinCenter;
 
-            const auto maxBinContent = hist->GetBinContent(maxBin);
-            const auto height = maxBinContent - baseLine;
-            const auto th = baseLine + thFactor * height;
-            auto leftBin = maxBin;
-            auto rightBin = maxBin;
-            while (leftBin > 0 && hist->GetBinContent(leftBin) > th) {
-              leftBin--;
-            }
-            while (rightBin < hist->GetNbinsX() &&
-                   hist->GetBinContent(rightBin) > th) {
-              rightBin++;
-            }
-            leftEdge = hist->GetBinLowEdge(leftBin);
-            rightEdge = hist->GetBinLowEdge(rightBin + 1);
-
-            localVec[i][j].TimeOffset = timeOffset;
-            localVec[i][j].TimeWindowLeftEdge = leftEdge;
-            localVec[i][j].TimeWindowRightEdge = rightEdge;
+            localVec[i][j] = timeOffset;
           }
         }
 
@@ -346,18 +318,13 @@ void DELILA::TimeAlignment::CalculateTimeAlignment(const double_t thFactor)
       for (auto iMod = 0; iMod < fChSettingsVec.size(); iMod++) {
         nlohmann::json modData = nlohmann::json::array();
         for (auto iCh = 0; iCh < fChSettingsVec[iMod].size(); iCh++) {
-          auto timeOffset =
-              timeSettingsVec[iRefMod][iRefCh][iMod][iCh].TimeOffset;
+          auto timeOffset = timeSettingsVec[iRefMod][iRefCh][iMod][iCh];
           if (timeOffset != 0.) {
             std::cout << iRefMod << " " << iRefCh << " " << iMod << " " << iCh
                       << " TimeOffset: " << timeOffset << std::endl;
           }
           nlohmann::json chData;
           chData["TimeOffset"] = timeOffset;
-          chData["TimeWindowLeftEdge"] =
-              timeSettingsVec[iRefMod][iRefCh][iMod][iCh].TimeWindowLeftEdge;
-          chData["TimeWindowRightEdge"] =
-              timeSettingsVec[iRefMod][iRefCh][iMod][iCh].TimeWindowRightEdge;
           modData.push_back(chData);
         }
         refChData.push_back(modData);
@@ -366,8 +333,9 @@ void DELILA::TimeAlignment::CalculateTimeAlignment(const double_t thFactor)
     }
     jsonData.push_back(refModData);
   }
-  std::ofstream ofs("timeSettings.json");
+
+  std::ofstream ofs(kTimeSettingsFileName);
   ofs << jsonData.dump(4) << std::endl;
   ofs.close();
-  std::cout << "timeSettings.json generated." << std::endl;
+  std::cout << kTimeSettingsFileName << " generated." << std::endl;
 }

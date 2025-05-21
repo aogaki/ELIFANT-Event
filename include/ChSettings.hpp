@@ -15,6 +15,7 @@ enum class DetectorType {
   AC = 1,
   PMT = 2,
   HPGe = 3,
+  Si = 4,
 };
 
 class ChSettings
@@ -60,6 +61,8 @@ class ChSettings
       return DetectorType::PMT;
     } else if (type == "hpge") {
       return DetectorType::HPGe;
+    } else if (type == "si") {
+      return DetectorType::Si;
     } else {
       return DetectorType::Unknown;
     }
@@ -170,55 +173,67 @@ class ChSettings
 };
 typedef ChSettings ChSettings_t;
 
-class TimeSettings
-{
- public:
-  TimeSettings() {};
+// class TimeSettings
+// {
+//  public:
+//   TimeSettings() {};
 
-  ~TimeSettings() {};
+//   ~TimeSettings() {};
 
-  double_t TimeOffset = 0.;
-  double_t TimeWindowLeftEdge = 0.;
-  double_t TimeWindowRightEdge = 0.;
+//   // In ns
+//   double_t TimeOffset = 0.;
+//   // Windows is relative to TimeOffset
+//   // actual time = TimeOffset - TimeWindowLeftEdge
+//   // actual time = TimeOffset + TimeWindowRightEdge
+//   double_t TimeWindowLeftEdge = 0.;
+//   double_t TimeWindowRightEdge = 0.;
 
-  static std::vector<std::vector<TimeSettings>> GetTimeSettings(
-      const std::string fileName)
-  {
-    std::vector<std::vector<TimeSettings>> timeSettingsVec;
+//   static std::vector<std::vector<std::vector<std::vector<TimeSettings>>>>
+//   GetTimeSettings(const std::string fileName)
+//   {
+//     std::vector<std::vector<std::vector<std::vector<TimeSettings>>>>
+//         timeSettingsVec;
 
-    std::ifstream ifs(fileName);
-    if (!ifs) {
-      std::cerr << "File not found: " << fileName << std::endl;
-      return timeSettingsVec;
-    }
+//     std::ifstream ifs(fileName);
+//     if (!ifs) {
+//       std::cerr << "File not found: " << fileName << std::endl;
+//       return timeSettingsVec;
+//     }
 
-    nlohmann::json j;
-    ifs >> j;
+//     nlohmann::json j;
+//     ifs >> j;
 
-    for (const auto &mod : j) {
-      std::vector<TimeSettings> timeSettings;
-      for (const auto &ch : mod) {
-        TimeSettings timeSetting;
-        timeSetting.TimeOffset = ch["TimeOffset"];
-        timeSetting.TimeWindowLeftEdge = ch["TimeWindowLeftEdge"];
-        timeSetting.TimeWindowRightEdge = ch["TimeWindowRightEdge"];
+//     for (const auto &refMod : j) {
+//       std::vector<std::vector<std::vector<TimeSettings>>> refModVec;
+//       for (const auto &refCh : refMod) {
+//         std::vector<std::vector<TimeSettings>> refChVec;
+//         for (const auto &mod : refCh) {
+//           std::vector<TimeSettings> idVec;
+//           for (const auto &ch : mod) {
+//             TimeSettings timeSetting;
+//             timeSetting.TimeOffset = ch["TimeOffset"];
+//             timeSetting.TimeWindowLeftEdge = ch["TimeWindowLeftEdge"];
+//             timeSetting.TimeWindowRightEdge = ch["TimeWindowRightEdge"];
+//             idVec.push_back(timeSetting);
+//           }
+//           refChVec.push_back(idVec);
+//         }
+//         refModVec.push_back(refChVec);
+//       }
+//       timeSettingsVec.push_back(refModVec);
+//     }
 
-        timeSettings.push_back(timeSetting);
-      }
-      timeSettingsVec.push_back(timeSettings);
-    }
+//     return timeSettingsVec;
+//   };
 
-    return timeSettingsVec;
-  };
-
-  void Print()
-  {
-    std::cout << "Time Offset: " << TimeOffset << std::endl;
-    std::cout << "Time Window Left Edge: " << TimeWindowLeftEdge << std::endl;
-    std::cout << "Time Window Right Edge: " << TimeWindowRightEdge << std::endl;
-  };
-};
-typedef TimeSettings TimeSettings_t;
+//   void Print()
+//   {
+//     std::cout << "Time Offset: " << TimeOffset << std::endl;
+//     std::cout << "Time Window Left Edge: " << TimeWindowLeftEdge << std::endl;
+//     std::cout << "Time Window Right Edge: " << TimeWindowRightEdge << std::endl;
+//   };
+// };
+// typedef TimeSettings TimeSettings_t;
 
 }  // namespace DELILA
 

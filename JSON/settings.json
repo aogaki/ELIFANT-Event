@@ -1,10 +1,13 @@
 {
-    "Directory": "/Users/aogaki/WorkSpace/ELIFANT2025/3He12C/data",
     "ChannelSettings": "chSettings.json",
-    "TimeSettings": "timeSettings.json",
-    "NumberOfThreads": 0,
-    "RunNumber": 76,
+    "CoincidenceWindow": 300.0,
+    "Directory": "/Users/aogaki/WorkSpace/E9/data/",
+    "EndVersion": 299,
+    "L2Settings": "L2Settings.json",
+    "NumberOfThread": 0,
+    "RunNumber": 103,
     "StartVersion": 0,
-    "EndVersion": 173,
-    "TimeWindow": 1000
+    "TimeReferenceCh": 0,
+    "TimeReferenceMod": 2,
+    "TimeWindow": 300.0
 }

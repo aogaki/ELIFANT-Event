@@ -2,6 +2,7 @@
 #define TimeAlignment_hpp 1
 
 #include <TFile.h>
+#include <TH1.h>
 #include <TH2.h>
 
 #include <mutex>
@@ -14,6 +15,7 @@ namespace DELILA
 {
 
 const std::string kTimeAlignmentFileName = "timeAlignment.root";
+const std::string kTimeSettingsFileName = "timeSettings.json";
 
 class TimeAlignment
 {
@@ -26,14 +28,12 @@ class TimeAlignment
   void SetTimeWindow(double_t timeWindow) { fTimeWindow = timeWindow; }
   void InitHistograms();
   void FillHistograms(const int nThreads);
-  void CalculateTimeAlignment(const double_t thFactor = 0.05);
+  void CalculateTimeAlignment();
 
  private:
   std::vector<std::vector<ChSettings_t>> fChSettingsVec;
-  std::vector<std::vector<int32_t>> fIDTable;
-  std::vector<std::vector<bool>> fTriggerTable;
-  std::vector<std::vector<DetectorType>> fDetectorTypeTable;
-  std::vector<std::vector<std::unique_ptr<TH2D>>> fHistograms;
+  std::vector<std::vector<std::unique_ptr<TH2D>>> fHistoTime;
+  std::vector<std::vector<std::unique_ptr<TH1D>>> fHistoADC;
   double_t fTimeWindow = 0.;
 
   bool fDataProcessFlag = false;

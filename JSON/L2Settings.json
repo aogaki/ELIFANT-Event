@@ -1,0 +1,39 @@
+[
+    {
+        "Type": "Counter",
+        "Name": "Si-Front_Counter",
+        "Tags": [
+            "Si-Front"
+        ]
+    },
+    {
+        "Type": "Counter",
+        "Name": "Si-Back_Counter",
+        "Tags": [
+            "Si-Back"
+        ]
+    },
+    {
+        "Name": "Si-Front_More_Than_0",
+        "Type": "Flag",
+        "Monitor": "Si-Front_Counter",
+        "Operator": ">",
+        "Value": 0
+    },
+    {
+        "Name": "Si-Back_More_Than_0",
+        "Type": "Flag",
+        "Monitor": "Si-Back_Counter",
+        "Operator": ">",
+        "Value": 0
+    },
+    {
+        "Name": "GSi-Both",
+        "Type": "Accept",
+        "Monitor": [
+            "Si-Front_More_Than_0",
+            "Si-Back_More_Than_0"
+        ],
+        "Operator": "AND"
+    }
+]

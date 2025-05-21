@@ -17,8 +17,8 @@
 #include <thread>
 #include <vector>
 
-#include "TChSettings.hpp"
-#include "TEventData.hpp"
+#include "ChSettings.hpp"
+#include "EventData.hpp"
 
 std::vector<std::string> GetFileList(const std::string dirName)
 {
@@ -34,7 +34,8 @@ std::vector<std::string> GetFileList(const std::string dirName)
   return fileList;
 }
 
-Double_t GetCalibratedEnergy(const ChSettings_t &chSetting, const UShort_t &adc)
+Double_t GetCalibratedEnergy(const DELILA::ChSettings_t &chSetting,
+                             const UShort_t &adc)
 {
   return chSetting.p0 + chSetting.p1 * adc + chSetting.p2 * adc * adc +
          chSetting.p3 * adc * adc * adc;
@@ -53,7 +54,7 @@ TH2D *histPSDvsTime[nModules][nChannels];
 void InitHists()
 {
   auto settingsFileName = "./chSettings.json";
-  auto chSettingsVec = TChSettings::GetChSettings(settingsFileName);
+  auto chSettingsVec = DELILA::ChSettings::GetChSettings(settingsFileName);
 
   for (uint32_t i = 0; i < nChannels; i++) {
     histTime[i] =
@@ -145,7 +146,7 @@ void AnalysisThread(TString fileName, uint32_t threadID)
 
   counterMutex.lock();
   auto settingsFileName = "./chSettings.json";
-  auto chSettingsVec = TChSettings::GetChSettings(settingsFileName);
+  auto chSettingsVec = DELILA::ChSettings::GetChSettings(settingsFileName);
   auto siTimeFunction = "Si_time_function.txt";
   std::vector<double_t> p0Vec;
   std::vector<double_t> p1Vec;
