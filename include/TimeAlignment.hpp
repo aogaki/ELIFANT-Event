@@ -42,6 +42,13 @@ class TimeAlignment
   void DataProcess(int threadID);
   void SaveHistograms();
 
+  // For fitting ADC spectrum
+  // Have to be a different class
+  std::vector<TF1 *> FitHist(TH1D *hist);
+  std::vector<double> GetPeaks(TH1D *hist, double sigma = 10,
+                               double threshold = 0.1);
+  Double_t FitFnc(Double_t *pos, Double_t *par);
+
 };  // TimeAlignment
 
 }  // namespace DELILA

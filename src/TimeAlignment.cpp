@@ -1,7 +1,9 @@
 #include "TimeAlignment.hpp"
 
+#include <TF1.h>
 #include <TFile.h>
 #include <TROOT.h>
+#include <TSpectrum.h>
 #include <TTree.h>
 
 #include <algorithm>
@@ -96,14 +98,21 @@ void DELILA::TimeAlignment::SaveHistograms()
     }
   }
 
-  for (size_t i = 0; i < fHistoTime.size(); i++) {
-    for (size_t j = 0; j < fHistoTime[i].size(); j++) {
+  for (size_t i = 0; i < fHistoADC.size(); i++) {
+    for (size_t j = 0; j < fHistoADC[i].size(); j++) {
       if (!fHistoADC[i][j]) {
         std::cerr << "Error: Histogram not initialized for module " << i
                   << ", channel " << j << std::endl;
         continue;
       }
+      auto hist = fHistoADC[i][j].get();  // crazy!
+      auto fitVec = FitHist(hist);
       fHistoADC[i][j]->Write();
+      for (auto fit : fitVec) {
+        if (fit) {
+          fit->Write();
+        }
+      }
     }
   }
 
@@ -119,29 +128,18 @@ void DELILA::TimeAlignment::FillHistograms(const int nThreads)
   ROOT::DisableImplicitMT();
   ROOT::EnableThreadSafety();
 
-  // check kTimeAlignmentFileName exists
-  auto file = new TFile(kTimeAlignmentFileName.c_str(), "READ");
-  if (file->IsOpen()) {
-    std::cout << "Time histogram file already exists: "
-              << kTimeAlignmentFileName << std::endl;
-    std::cout << "Skip to generate." << std::endl;
-    file->Close();
-    delete file;
-    return;
-  } else {
-    std::vector<std::thread> threads;
-    fDataProcessFlag = true;
-    for (int i = 0; i < nThreads; ++i) {
-      threads.emplace_back(&DELILA::TimeAlignment::DataProcess, this, i);
-    }
-
-    for (auto &thread : threads) {
-      if (thread.joinable()) {
-        thread.join();
-      }
-    }
-    SaveHistograms();
+  std::vector<std::thread> threads;
+  fDataProcessFlag = true;
+  for (int i = 0; i < nThreads; ++i) {
+    threads.emplace_back(&DELILA::TimeAlignment::DataProcess, this, i);
   }
+
+  for (auto &thread : threads) {
+    if (thread.joinable()) {
+      thread.join();
+    }
+  }
+  SaveHistograms();
 }
 
 void DELILA::TimeAlignment::DataProcess(int threadID)
@@ -186,7 +184,9 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
     dataVec.reserve(nEvents);
     for (int64_t iEve = 0; iEve < nEvents; iEve++) {
       tree->GetEntry(iEve);
-      fHistoADC[mod][ch]->Fill(chargeLong);
+      if (chargeLong > 100) {
+        fHistoADC[mod][ch]->Fill(chargeLong);
+      }
       dataVec.emplace_back(mod, ch, fineTS / 1000.);  // ps -> ns
     }
     file->Close();
@@ -261,8 +261,9 @@ void DELILA::TimeAlignment::CalculateTimeAlignment()
       if (!hist2D) {
         std::cerr << "Error: Could not find histogram: " << histName
                   << std::endl;
-        file->Close();
-        delete file;
+        // file->Close();
+        // delete file;
+        continue;
       }
       auto histVec = std::vector<std::vector<TH1D *>>();
       histVec.resize(fChSettingsVec.size());
@@ -306,7 +307,6 @@ void DELILA::TimeAlignment::CalculateTimeAlignment()
       }
     }
   }
-
   file->Close();
   delete file;
 
@@ -315,6 +315,9 @@ void DELILA::TimeAlignment::CalculateTimeAlignment()
     nlohmann::json refModData = nlohmann::json::array();
     for (auto iRefCh = 0; iRefCh < fChSettingsVec[iRefMod].size(); iRefCh++) {
       nlohmann::json refChData = nlohmann::json::array();
+      if (timeSettingsVec[iRefMod][iRefCh].size() == 0) {
+        continue;
+      }
       for (auto iMod = 0; iMod < fChSettingsVec.size(); iMod++) {
         nlohmann::json modData = nlohmann::json::array();
         for (auto iCh = 0; iCh < fChSettingsVec[iMod].size(); iCh++) {
@@ -338,4 +341,56 @@ void DELILA::TimeAlignment::CalculateTimeAlignment()
   ofs << jsonData.dump(4) << std::endl;
   ofs.close();
   std::cout << kTimeSettingsFileName << " generated." << std::endl;
+}
+
+std::vector<TF1 *> DELILA::TimeAlignment::FitHist(TH1D *hist)
+{
+  // Fit the histogram to find the peaks
+
+  std::vector<TF1 *> fitVec;
+  auto peaks = GetPeaks(hist, 50, 0.2);
+  TF1 *simpleGaus = new TF1("simpleGaus", "gaus");
+  auto histName = hist->GetName();
+  for (int i = 0; i < peaks.size(); i++) {
+    // Get peak information
+    auto peakPos = peaks[i];
+    auto peakHeight = hist->GetBinContent(hist->FindBin(peakPos));
+    simpleGaus->SetRange(peakPos - 10, peakPos + 10);
+    simpleGaus->SetParameters(peakHeight, peakPos, 1);
+    hist->Fit(simpleGaus, "RQ");
+    auto peakSigma = simpleGaus->GetParameter(2);
+
+    // Get BG information
+    auto bgLeft = hist->GetBinContent(hist->FindBin(peakPos - 2 * peakSigma));
+    auto bgRight = hist->GetBinContent(hist->FindBin(peakPos + 2 * peakSigma));
+    auto bgSlope = (bgRight - bgLeft) / (4 * peakSigma);
+    auto bgIntercept = bgLeft - bgSlope * (peakPos - 4 * peakSigma);
+
+    auto fncName = TString(histName) + Form("_f%d", i);
+    auto fit = new TF1(fncName, "gaus(0)+pol1(3)", peakPos - 2 * peakSigma,
+                       peakPos + 2 * peakSigma);
+    fit->SetParNames("height", "mean", "sigma", "bgIntercept", "bgSlope");
+    fit->SetParameters(peakHeight, peakPos, peakSigma, bgIntercept, bgSlope);
+    hist->Fit(fit, "RQ");
+    hist->Fit(fit, "RQ");
+    fitVec.push_back(fit);
+  }
+
+  return fitVec;
+}
+
+std::vector<double> DELILA::TimeAlignment::GetPeaks(TH1D *hist, double sigma,
+                                                    double threshold)
+{
+  TSpectrum *s = new TSpectrum(20);
+  int n = s->Search(hist, sigma, "", threshold);
+  std::vector<double> peaks;
+
+  double *p = s->GetPositionX();
+  for (int i = 0; i < n; i++) {
+    peaks.push_back(p[i]);
+  }
+
+  std::sort(peaks.begin(), peaks.end());
+  return peaks;
 }
