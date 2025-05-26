@@ -301,6 +301,9 @@ void DELILA::L2EventBuilder::ProcessData(
       fillFlag |= accept.Check(localFlagVec);
     }
 
+    // if (localDataAcceptanceVec.size() == 0) {
+    //   fillFlag = true;  // If no acceptance is defined, fill the tree
+    // }
     if (fillFlag) {
       outputTree->Fill();
     }

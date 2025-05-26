@@ -1,38 +1,38 @@
 [
     {
         "Type": "Counter",
-        "Name": "Si-Front_Counter",
+        "Name": "E_Sector_Counter",
         "Tags": [
-            "Si-Front"
+            "E_Sector"
         ]
     },
     {
         "Type": "Counter",
-        "Name": "Si-Back_Counter",
+        "Name": "dE_Sector_Counter",
         "Tags": [
-            "Si-Back"
+            "dE_Sector"
         ]
     },
     {
-        "Name": "Si-Front_More_Than_0",
+        "Name": "dE_more_than_0",
         "Type": "Flag",
-        "Monitor": "Si-Front_Counter",
+        "Monitor": "dE_Sector_Counter",
         "Operator": ">",
         "Value": 0
     },
     {
-        "Name": "Si-Back_More_Than_0",
+        "Name": "E_More_Than_0",
         "Type": "Flag",
-        "Monitor": "Si-Back_Counter",
+        "Monitor": "E_Sector_Counter",
         "Operator": ">",
         "Value": 0
     },
     {
-        "Name": "GSi-Both",
+        "Name": "Si_Both",
         "Type": "Accept",
         "Monitor": [
-            "Si-Front_More_Than_0",
-            "Si-Back_More_Than_0"
+            "E_More_Than_0",
+            "dE_More_Than_0"
         ],
         "Operator": "AND"
     }
