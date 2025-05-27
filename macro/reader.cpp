@@ -7,6 +7,7 @@
 #include <TROOT.h>
 #include <TSystem.h>
 #include <TTree.h>
+#include <TCut.h>
 
 #include <chrono>
 #include <filesystem>
@@ -47,16 +48,36 @@ constexpr uint32_t nModules = 11;
 constexpr uint32_t nChannels = 32;
 TH1D *histADC[nModules][nChannels];
 TH1D *histEnergy[nModules][nChannels];
+TH1D *histEnergySum;
 constexpr uint32_t nSectors = 16;
 TH2D *histSectorCorrelation[nSectors][nSectors];
 TH2D *histSectorCorrelationSum;
 constexpr uint32_t nRings = 48;
 TH2D *histRingCorrelation[nRings][nRings];
 TH2D *histRingCorrelationSum;
+TH2D *histRingCorrelationSumGateTest;
 TH2D *histDERingESectorCorrelation[nRings];
 TH2D *histDERingESectorCorrelationSum;
+TCutG *cutg;
 void InitHists()
 {
+  cutg = new TCutG("CUTG",13);
+  cutg->SetPoint(0,266.599,5165.24);
+  cutg->SetPoint(1,2681.09,3957.04);
+  cutg->SetPoint(2,5531.52, 3143.01);
+  cutg->SetPoint(3,8180.75,2551.77);
+  cutg->SetPoint(4,11785.7,2123.33);
+  cutg->SetPoint(5,12607.3, 2037.65);
+  cutg->SetPoint(6,12523.5, 1266.46);
+  cutg->SetPoint(7,10712.6, 1352.15);
+  cutg->SetPoint(8,6789.07, 1943.39);
+  cutg->SetPoint(9,3703.89, 2680.3);
+  cutg->SetPoint(10,954.058, 3879.92);
+  cutg->SetPoint(11,165.996, 4454.03);
+  cutg->SetPoint(12,266.599, 5165.24);
+
+  histEnergySum = new TH1D("histEnergySum", "Sum with cut", 32000, 0, 32000);
+
   auto settingsFileName = "./chSettings.json";
   auto chSettingsVec = DELILA::ChSettings::GetChSettings(settingsFileName);
 
@@ -98,15 +119,15 @@ void InitHists()
     for (uint32_t j = 0; j < nSectors; j++) {
       histSectorCorrelation[i][j] =
           new TH2D(Form("histSectorCorrelation_%02d_%02d", i, j),
-                   Form("Sector Correlation dE %02d vs E %02d", i, j), 2000, 0,
-                   20000, 2000, 0, 20000);
+                   Form("Sector Correlation dE %02d vs E %02d", i, j), 500, 0,
+                   20000, 500, 0, 20000);
       histSectorCorrelation[i][j]->SetXTitle("[keV]");
       histSectorCorrelation[i][j]->SetYTitle("[keV]");
     }
   }
   histSectorCorrelationSum =
-      new TH2D("histSectorCorrelationSum", "Sector Correlation Sum", 2000, 0,
-               20000, 2000, 0, 20000);
+      new TH2D("histSectorCorrelationSum", "Sector Correlation Sum", 500, 0,
+               20000, 500, 0, 20000);
   histSectorCorrelationSum->SetXTitle("[keV]");
   histSectorCorrelationSum->SetYTitle("[keV]");
 
@@ -114,29 +135,35 @@ void InitHists()
     for (uint32_t j = 0; j < nRings; j++) {
       histRingCorrelation[i][j] =
           new TH2D(Form("histRingCorrelation_%02d_%02d", i, j),
-                   Form("Ring Correlation dE %02d vs E %02d", i, j), 2000, 0,
-                   20000, 2000, 0, 20000);
+                   Form("Ring Correlation dE %02d vs E %02d", i, j), 500, 0,
+                   20000, 500, 0, 20000);
       histRingCorrelation[i][j]->SetXTitle("[keV]");
       histRingCorrelation[i][j]->SetYTitle("[keV]");
     }
   }
   histRingCorrelationSum =
-      new TH2D("histRingCorrelationSum", "Ring Correlation Sum", 2000, 0, 20000,
-               2000, 0, 20000);
+      new TH2D("histRingCorrelationSum", "Ring Correlation Sum", 500, 0, 20000,
+               500, 0, 20000);
   histRingCorrelationSum->SetXTitle("[keV]");
   histRingCorrelationSum->SetYTitle("[keV]");
+  
+  histRingCorrelationSumGateTest =
+      new TH2D("histRingCorrelationSumGatecheck", "Ring Correlation Sum", 500, 0, 20000,
+               500, 0, 20000);
+  histRingCorrelationSumGateTest->SetXTitle("[keV]");
+  histRingCorrelationSumGateTest->SetYTitle("[keV]");
 
   for (uint32_t i = 0; i < nRings; i++) {
     histDERingESectorCorrelation[i] =
         new TH2D(Form("histDERingESectorCorrelation_%02d", i),
-                 Form("dE Ring %02d vs E All Sector", i), 2000, 0, 20000, 2000,
+                 Form("dE Ring %02d vs E All Sector", i), 500, 0, 20000, 500,
                  0, 20000);
     histDERingESectorCorrelation[i]->SetXTitle("[keV]");
     histDERingESectorCorrelation[i]->SetYTitle("[keV]");
   }
   histDERingESectorCorrelationSum =
       new TH2D("histDERingESectorCorrelationSum", "dE Ring vs E Sector Sum",
-               2000, 0, 20000, 2000, 0, 20000);
+               500, 0, 20000, 500, 0, 20000);
   histDERingESectorCorrelationSum->SetXTitle("[keV]");
   histDERingESectorCorrelationSum->SetYTitle("[keV]");
 }
@@ -181,11 +208,15 @@ void AnalysisThread(TString fileName, uint32_t threadID)
   UInt_t ringE = 0;
   UInt_t ringDE = 0;
 
+           
+  
   auto const nEntries = tree->GetEntries();
   {
     std::lock_guard<std::mutex> lock(counterMutex);
     totalEvents += nEntries;
   }
+  
+ //   for (auto iEve = 0; iEve < 10000; iEve++) {
   for (auto iEve = 0; iEve < nEntries; iEve++) {
     tree->GetEntry(iEve);
     constexpr auto nProcess = 1000;
@@ -194,6 +225,7 @@ void AnalysisThread(TString fileName, uint32_t threadID)
       processedEvents += nProcess;
     }
 
+    bool cutFlag = false;
     for (auto &event : *eventData.eventDataVec) {
       if (event.isWithAC) {
         continue;  // Skip events with AC data
@@ -235,11 +267,29 @@ void AnalysisThread(TString fileName, uint32_t threadID)
             eneDE = GetCalibratedEnergy(chSetting, dEEvent.chargeLong);
             ringDE = (dEEvent.mod - 1) * 16 + dEEvent.ch;  // 0-47
             histRingCorrelation[ringDE][ringE]->Fill(eneE, eneDE);
-            histRingCorrelationSum->Fill(eneE, eneDE);
+            //histRingCorrelationSum->Fill(eneE, eneDE);
+            {    
+	      std::lock_guard<std::mutex> lock(counterMutex);
+            if(cutg->IsInside(eneE,eneDE)){
+            cutFlag = true;
+              histRingCorrelationSum->Fill(eneE, eneDE);
+            //histRingCorrelationSumGateTest->Fill(eneE, eneDE);
+             //std::cout << eneE<<"\t"<<eneDE<<std::endl;
+            }
+            }
           }
         }
       }
     }
+if(cutFlag){    
+        for (auto &event : *eventData.eventDataVec) {
+      if (event.mod == 9) {  // Find E
+            auto chSetting = chSettingsVec.at(event.mod).at(event.ch);
+        eneE = GetCalibratedEnergy(chSetting, event.chargeLong);        
+histEnergySum->Fill(eneE);
+}
+     }
+     }
   }
 
   IsFinished.at(threadID) = true;
@@ -344,6 +394,7 @@ void reader()
 
   std::cout << "Writing results to file..." << std::endl;
   TFile outFile("results.root", "RECREATE");
+  histEnergySum->Write();
   outFile.cd();
   outFile.mkdir("SectorSector");
   outFile.mkdir("RingRing");
@@ -363,6 +414,7 @@ void reader()
     }
   }
   if (histRingCorrelationSum) histRingCorrelationSum->Write();
+  if (histRingCorrelationSumGateTest) histRingCorrelationSumGateTest->Write();
   outFile.cd("DERingESector");
   for (uint32_t i = 0; i < nRings; i++) {
     if (histDERingESectorCorrelation[i]) {
@@ -381,4 +433,5 @@ void reader()
       if (histEnergy[i][j]) histEnergy[i][j]->Write();
     }
   }
+  outFile.Close();
 }
