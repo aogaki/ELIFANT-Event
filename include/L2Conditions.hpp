@@ -99,25 +99,37 @@ class L2DataAcceptance
 
   bool Check(std::vector<L2Flag> &flagVec)
   {
+    uint32_t checkCounter = 0;
+
     if (fLogicalOperator == "AND") {
       for (auto &monitor : fMonitorVec) {
         for (auto &flag : flagVec) {
           if (flag.name == monitor) {
+            checkCounter++;
             if (!flag.flag) {
               return false;
             }
           }
         }
       }
+      if (checkCounter == 0) {
+        std::cerr << "Error: No monitors found in flag vector." << std::endl;
+        return false;
+      }
     } else if (fLogicalOperator == "OR") {
       for (auto &monitor : fMonitorVec) {
         for (auto &flag : flagVec) {
           if (flag.name == monitor) {
+            checkCounter++;
             if (flag.flag) {
               return true;
             }
           }
         }
+      }
+      if (checkCounter == 0) {
+        std::cerr << "Error: No monitors found in flag vector." << std::endl;
+        return false;
       }
     } else {
       std::cerr << "Error: Unknown logical operator: " << fLogicalOperator

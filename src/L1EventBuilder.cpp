@@ -117,6 +117,7 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
     {
       std::lock_guard<std::mutex> lock(fFileListMutex);
       std::cout << "Thread " << threadID << " reading file: " << fileName
+                << " (" << iFile + 1 << "/" << fileList.size() << ")"
                 << std::endl;
     }
 
@@ -193,7 +194,7 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
         for (auto jEve = iEve + 1; (jEve < nRawData) && fillFlag; jEve++) {
           auto &rawData2 = rawDataVec[jEve];
           auto ts = rawData2->fineTS - eventData.triggerTime;
-          if (ts > fTimeWindow) {
+          if (ts > fCoincidenceWindow) {
             break;
           }
           auto mod = rawData2->mod;
@@ -214,7 +215,7 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
         for (auto jEve = iEve - 1; (jEve >= 0) && fillFlag; jEve--) {
           auto &rawData2 = rawDataVec[jEve];
           auto ts = rawData2->fineTS - eventData.triggerTime;
-          if (ts < -fTimeWindow) {
+          if (ts < -fCoincidenceWindow) {
             break;
           }
           auto mod = rawData2->mod;

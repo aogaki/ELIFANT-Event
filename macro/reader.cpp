@@ -19,12 +19,14 @@
 
 #include "ChSettings.hpp"
 #include "EventData.hpp"
+#include "L2Conditions.hpp"
+#include "L2EventBuilder.hpp"
 
 std::vector<std::string> GetFileList(const std::string dirName)
 {
   std::vector<std::string> fileList;
 
-  auto searchKey = Form("events_t");
+  auto searchKey = Form("L2_");
   for (const auto &entry : std::filesystem::directory_iterator(dirName)) {
     if (entry.path().string().find(searchKey) != std::string::npos) {
       fileList.push_back(entry.path().string());
@@ -41,44 +43,22 @@ Double_t GetCalibratedEnergy(const DELILA::ChSettings_t &chSetting,
          chSetting.p3 * adc * adc * adc;
 }
 
-constexpr uint32_t nModules = 9;
-constexpr uint32_t nChannels = 16;
-TH2D *histTime[nChannels + 1];
-TH1D *histSiMultiplicty;
-TH1D *histGammaMultiplicity;
-TH1D *histNeutronMultiplicity;
+constexpr uint32_t nModules = 11;
+constexpr uint32_t nChannels = 32;
 TH1D *histADC[nModules][nChannels];
 TH1D *histEnergy[nModules][nChannels];
-TH2D *histADCvsTime[nModules][nChannels];
-TH2D *histPSDvsTime[nModules][nChannels];
+constexpr uint32_t nSectors = 16;
+TH2D *histSectorCorrelation[nSectors][nSectors];
+TH2D *histSectorCorrelationSum;
+constexpr uint32_t nRings = 48;
+TH2D *histRingCorrelation[nRings][nRings];
+TH2D *histRingCorrelationSum;
+TH2D *histDERingESectorCorrelation[nRings];
+TH2D *histDERingESectorCorrelationSum;
 void InitHists()
 {
   auto settingsFileName = "./chSettings.json";
   auto chSettingsVec = DELILA::ChSettings::GetChSettings(settingsFileName);
-
-  for (uint32_t i = 0; i < nChannels; i++) {
-    histTime[i] =
-        new TH2D(Form("histTime_%d", i),
-                 Form("Time difference ID%02d and other detectors", i), 20000,
-                 -1000, 1000, 151, -0.5, 150.5);
-    histTime[i]->SetXTitle("[ns]");
-    histTime[i]->SetYTitle("Detector ID");
-  }
-  histTime[nChannels] =
-      new TH2D("histTime", "Time difference between detectors", 20000, -1000,
-               1000, 151, -0.5, 150.5);
-
-  histSiMultiplicty =
-      new TH1D("histSiMultiplicity", "Si Multiplicity", 33, -0.5, 32.5);
-  histSiMultiplicty->SetXTitle("Multiplicity");
-
-  histGammaMultiplicity =
-      new TH1D("histGammaMultiplicity", "Gamma Multiplicity", 48, -0.5, 47.5);
-  histGammaMultiplicity->SetXTitle("Multiplicity");
-
-  histNeutronMultiplicity = new TH1D("histNeutronMultiplicity",
-                                     "Neutron Multiplicity", 48, -0.5, 47.5);
-  histNeutronMultiplicity->SetXTitle("Multiplicity");
 
   constexpr uint32_t nBins = 32000;
   for (uint32_t i = 0; i < nModules; i++) {
@@ -92,12 +72,13 @@ void InitHists()
 
   for (uint32_t i = 0; i < nModules; i++) {
     for (uint32_t j = 0; j < nChannels; j++) {
+      if (i >= chSettingsVec.size() || j >= chSettingsVec.at(i).size()) {
+        continue;
+      }
       auto chSetting = chSettingsVec.at(i).at(j);
       std::array<double_t, nBins + 1> binTable;
       for (uint16_t k = 0; k < nBins + 1; k++) {
-        auto currentBin = GetCalibratedEnergy(chSetting, k);
-        auto nextBin = GetCalibratedEnergy(chSetting, k + 1);
-        auto nextEdge = (currentBin + nextBin) / 2.;
+        auto nextEdge = GetCalibratedEnergy(chSetting, k);
         if (k != 0) {
           auto previousEdge = binTable.at(k - 1);
           if (nextEdge < previousEdge) {
@@ -113,27 +94,51 @@ void InitHists()
     }
   }
 
-  for (uint32_t i = 0; i < nModules; i++) {
-    for (uint32_t j = 0; j < nChannels; j++) {
-      histADCvsTime[i][j] =
-          new TH2D(Form("histADCvsTime_%d_%d", i, j),
-                   Form("Energy vs Time Module%02d Channel%02d", i, j), 2000,
-                   -1000, 1000, nBins / 10, 0.5, nBins + 0.5);
-      histADCvsTime[i][j]->SetXTitle("Time [ns]");
-      histADCvsTime[i][j]->SetYTitle("ADC channel");
+  for (uint32_t i = 0; i < nSectors; i++) {
+    for (uint32_t j = 0; j < nSectors; j++) {
+      histSectorCorrelation[i][j] =
+          new TH2D(Form("histSectorCorrelation_%02d_%02d", i, j),
+                   Form("Sector Correlation dE %02d vs E %02d", i, j), 2000, 0,
+                   20000, 2000, 0, 20000);
+      histSectorCorrelation[i][j]->SetXTitle("[keV]");
+      histSectorCorrelation[i][j]->SetYTitle("[keV]");
     }
   }
+  histSectorCorrelationSum =
+      new TH2D("histSectorCorrelationSum", "Sector Correlation Sum", 2000, 0,
+               20000, 2000, 0, 20000);
+  histSectorCorrelationSum->SetXTitle("[keV]");
+  histSectorCorrelationSum->SetYTitle("[keV]");
 
-  for (uint32_t i = 0; i < nModules; i++) {
-    for (uint32_t j = 0; j < nChannels; j++) {
-      histPSDvsTime[i][j] =
-          new TH2D(Form("histPSDvsTime_%d_%d", i, j),
-                   Form("PSD vs Time Module%02d Channel%02d", i, j), 2000,
-                   -1000, 1000, 1000, 0, 1);
-      histPSDvsTime[i][j]->SetXTitle("Time [ns]");
-      histPSDvsTime[i][j]->SetYTitle("PSD");
+  for (uint32_t i = 0; i < nRings; i++) {
+    for (uint32_t j = 0; j < nRings; j++) {
+      histRingCorrelation[i][j] =
+          new TH2D(Form("histRingCorrelation_%02d_%02d", i, j),
+                   Form("Ring Correlation dE %02d vs E %02d", i, j), 2000, 0,
+                   20000, 2000, 0, 20000);
+      histRingCorrelation[i][j]->SetXTitle("[keV]");
+      histRingCorrelation[i][j]->SetYTitle("[keV]");
     }
   }
+  histRingCorrelationSum =
+      new TH2D("histRingCorrelationSum", "Ring Correlation Sum", 2000, 0, 20000,
+               2000, 0, 20000);
+  histRingCorrelationSum->SetXTitle("[keV]");
+  histRingCorrelationSum->SetYTitle("[keV]");
+
+  for (uint32_t i = 0; i < nRings; i++) {
+    histDERingESectorCorrelation[i] =
+        new TH2D(Form("histDERingESectorCorrelation_%02d", i),
+                 Form("dE Ring %02d vs E All Sector", i), 2000, 0, 20000, 2000,
+                 0, 20000);
+    histDERingESectorCorrelation[i]->SetXTitle("[keV]");
+    histDERingESectorCorrelation[i]->SetYTitle("[keV]");
+  }
+  histDERingESectorCorrelationSum =
+      new TH2D("histDERingESectorCorrelationSum", "dE Ring vs E Sector Sum",
+               2000, 0, 20000, 2000, 0, 20000);
+  histDERingESectorCorrelationSum->SetXTitle("[keV]");
+  histDERingESectorCorrelationSum->SetYTitle("[keV]");
 }
 
 std::mutex counterMutex;
@@ -147,30 +152,6 @@ void AnalysisThread(TString fileName, uint32_t threadID)
   counterMutex.lock();
   auto settingsFileName = "./chSettings.json";
   auto chSettingsVec = DELILA::ChSettings::GetChSettings(settingsFileName);
-  auto siTimeFunction = "Si_time_function.txt";
-  std::vector<double_t> p0Vec;
-  std::vector<double_t> p1Vec;
-  std::vector<double_t> p2Vec;
-  std::vector<double_t> p3Vec;
-  bool isSiTimeFunction = false;
-  std::ifstream ifs(siTimeFunction);
-  if (!ifs) {
-    std::cerr << "File not found: " << siTimeFunction << std::endl;
-  } else {
-    isSiTimeFunction = true;
-    std::string line;
-    while (std::getline(ifs, line)) {
-      std::istringstream iss(line);
-      int32_t ch;
-      double_t p0, p1, p2, p3;
-      iss >> ch >> p0 >> p1 >> p2 >> p3;
-      p0Vec.push_back(p0);
-      p1Vec.push_back(p1);
-      p2Vec.push_back(p2);
-      p3Vec.push_back(p3);
-    }
-  }
-  ifs.close();
   counterMutex.unlock();
 
   auto file = TFile::Open(fileName, "READ");
@@ -178,116 +159,106 @@ void AnalysisThread(TString fileName, uint32_t threadID)
     std::cerr << "File not found: events.root" << std::endl;
     return;
   }
-  auto tree = dynamic_cast<TTree *>(file->Get("Event_Tree"));
+  auto tree = dynamic_cast<TTree *>(file->Get("L2EventData"));
   if (!tree) {
     std::cerr << "Tree not found: Event_Tree" << std::endl;
     return;
   }
 
-  bool IsFissionEvent;
-  tree->SetBranchAddress("IsFissionEvent", &IsFissionEvent);
-  uint8_t TriggerID;
-  tree->SetBranchAddress("TriggerID", &TriggerID);
-  uint8_t SiFrontMultiplicity;
-  tree->SetBranchAddress("SiFrontMultiplicity", &SiFrontMultiplicity);
-  uint8_t SiBackMultiplicity;
-  tree->SetBranchAddress("SiBackMultiplicity", &SiBackMultiplicity);
-  uint8_t SiMultiplicity;
-  tree->SetBranchAddress("SiMultiplicity", &SiMultiplicity);
-  uint8_t GammaMultiplicity;
-  tree->SetBranchAddress("GammaMultiplicity", &GammaMultiplicity);
-  uint8_t NeutronMultiplicity;
-  tree->SetBranchAddress("NeutronMultiplicity", &NeutronMultiplicity);
-  std::vector<uint8_t> *Module = nullptr;
-  tree->SetBranchAddress("Module", &Module);
-  std::vector<uint8_t> *Channel = nullptr;
-  tree->SetBranchAddress("Channel", &Channel);
-  std::vector<double_t> *Timestamp = nullptr;
-  tree->SetBranchAddress("Timestamp", &Timestamp);
-  std::vector<uint16_t> *Energy = nullptr;
-  tree->SetBranchAddress("Energy", &Energy);
-  std::vector<uint16_t> *EnergyShort = nullptr;
-  tree->SetBranchAddress("EnergyShort", &EnergyShort);
+  DELILA::EventData eventData;
+  tree->SetBranchAddress("TriggerTime", &eventData.triggerTime);
+  tree->SetBranchAddress("EventDataVec", &eventData.eventDataVec);
 
-  const auto nEntries = tree->GetEntries();
+  ULong64_t ESectorCounter = 0;
+  tree->SetBranchAddress("E_Sector_Counter", &ESectorCounter);
+  ULong64_t dESectorCounter = 0;
+  tree->SetBranchAddress("dE_Sector_Counter", &dESectorCounter);
+
+  Double_t eneE = 0.;
+  Double_t eneDE = 0.;
+  UInt_t sectorE = 0;
+  UInt_t sectorDE = 0;
+  UInt_t ringE = 0;
+  UInt_t ringDE = 0;
+
+  auto const nEntries = tree->GetEntries();
   {
     std::lock_guard<std::mutex> lock(counterMutex);
     totalEvents += nEntries;
   }
-
-  for (auto i = 0; i < nEntries; i++) {
-    tree->GetEntry(i);
+  for (auto iEve = 0; iEve < nEntries; iEve++) {
+    tree->GetEntry(iEve);
     constexpr auto nProcess = 1000;
-    if (i % nProcess == 0) {
+    if (iEve % nProcess == 0) {
       std::lock_guard<std::mutex> lock(counterMutex);
       processedEvents += nProcess;
     }
 
-    if (IsFissionEvent) {
-      uint16_t SiEnergy = 0;
-      uint16_t SiCh = 0;
-      for (uint32_t j = 0; j < Module->size(); j++) {
-        auto module = Module->at(j);
-        auto timestamp = Timestamp->at(j);
-        if (module == 0 && timestamp == 0) {
-          SiCh = Channel->at(j);
-          SiEnergy = Energy->at(j);
-          break;
+    for (auto &event : *eventData.eventDataVec) {
+      if (event.isWithAC) {
+        continue;  // Skip events with AC data
+      }
+
+      if (event.mod >= nModules || event.ch >= nChannels) {
+        continue;  // Skip invalid channels
+      }
+
+      auto chSetting = chSettingsVec.at(event.mod).at(event.ch);
+      histADC[event.mod][event.ch]->Fill(event.chargeLong);
+      histEnergy[event.mod][event.ch]->Fill(
+          GetCalibratedEnergy(chSetting, event.chargeLong));
+
+      if (event.mod == 4) {  // Find E
+        eneE = GetCalibratedEnergy(chSetting, event.chargeLong);
+        sectorE = event.ch;
+        for (auto &dEEvent : *eventData.eventDataVec) {  // all combinations
+          if (dEEvent.mod == 0) {                        // Find dE
+            eneDE = GetCalibratedEnergy(chSetting, dEEvent.chargeLong);
+            sectorDE = dEEvent.ch;
+            histSectorCorrelation[sectorDE][sectorE]->Fill(eneE, eneDE);
+            histSectorCorrelationSum->Fill(eneE, eneDE);
+          } else if (dEEvent.mod == 1 || dEEvent.mod == 2 ||
+                     dEEvent.mod == 3) {  // Find dE
+            eneDE = GetCalibratedEnergy(chSetting, dEEvent.chargeLong);
+            ringDE = (dEEvent.mod - 1) * 16 + dEEvent.ch;  // 0-47
+            histDERingESectorCorrelation[ringDE]->Fill(eneE, eneDE);
+            histDERingESectorCorrelationSum->Fill(eneE, eneDE);
+          }
         }
       }
-      double SiTime = 0;
-      if (isSiTimeFunction) {
-        SiTime = p0Vec.at(SiCh) + p1Vec.at(SiCh) * SiEnergy +
-                 p2Vec.at(SiCh) * SiEnergy * SiEnergy +
-                 p3Vec.at(SiCh) * SiEnergy * SiEnergy * SiEnergy;
-      }
 
-      histSiMultiplicty->Fill(SiMultiplicity);
-      histGammaMultiplicity->Fill(GammaMultiplicity);
-      histNeutronMultiplicity->Fill(NeutronMultiplicity);
-
-      auto triggerCh = TriggerID % 16;
-      for (uint32_t j = 0; j < Module->size(); j++) {
-        auto module = Module->at(j);
-        auto channel = Channel->at(j);
-        auto timestamp = Timestamp->at(j) + SiTime;
-        // auto timestamp = Timestamp->at(j);
-        auto energy = Energy->at(j);
-        auto energyShort = EnergyShort->at(j);
-        auto chSetting = chSettingsVec.at(module).at(channel);
-        auto calibratedEnergy = GetCalibratedEnergy(chSetting, energy);
-        auto calibratedEnergyShort =
-            GetCalibratedEnergy(chSetting, energyShort);
-        auto psd = double(energy - energyShort) / double(energy);
-
-        auto hitID = module * 16 + channel;
-        // if (module != 0) {
-        histTime[triggerCh]->Fill(timestamp, hitID);
-        histTime[16]->Fill(timestamp, hitID);  // Sum of all
-        // }
-
-        histADC[module][channel]->Fill(energy);
-        histEnergy[module][channel]->Fill(calibratedEnergy);
-        histADCvsTime[module][channel]->Fill(timestamp, energy);
-        histPSDvsTime[module][channel]->Fill(timestamp, psd);
+      if (event.mod == 5 || event.mod == 6 || event.mod == 7) {  // Find E
+        eneE = GetCalibratedEnergy(chSetting, event.chargeLong);
+        ringE = (event.mod - 5) * 16 + event.ch;         // 0-47
+        for (auto &dEEvent : *eventData.eventDataVec) {  // all combinations
+          if (dEEvent.mod == 1 || dEEvent.mod == 2 || dEEvent.mod == 3) {
+            eneDE = GetCalibratedEnergy(chSetting, dEEvent.chargeLong);
+            ringDE = (dEEvent.mod - 1) * 16 + dEEvent.ch;  // 0-47
+            histRingCorrelation[ringDE][ringE]->Fill(eneE, eneDE);
+            histRingCorrelationSum->Fill(eneE, eneDE);
+          }
+        }
       }
     }
   }
 
   IsFinished.at(threadID) = true;
+  file->Close();
 }
 
 void reader()
 {
+  gSystem->Load("libEveBuilder.dylib");
+
   ROOT::EnableThreadSafety();
 
   InitHists();
+  std::cout << "Initialized histograms." << std::endl;
 
   auto fileList = GetFileList("./");
 
   auto startTime = std::chrono::high_resolution_clock::now();
   auto lastTime = startTime;
-
   std::vector<std::thread> threads;
   for (uint32_t i = 0; i < fileList.size(); i++) {
     threads.emplace_back(AnalysisThread, fileList.at(i), i);
@@ -334,27 +305,80 @@ void reader()
             << totalEvents << ", spent " << int(elapsed / 1.e3) << "s  \b\b"
             << std::endl;
 
-  // Draw all histograms of ADC and Energy
-  // TCanvas *cavasADC[nModules];
-  // TCanvas *cavasEnergy[nModules];
-  // for (uint32_t i = 0; i < nModules; i++) {
-  //   cavasADC[i] =
-  //       new TCanvas(Form("cavasADC_%d", i), Form("Module %02d", i), 800, 600);
-  //   cavasADC[i]->Divide(4, 4);
-  //   cavasEnergy[i] = new TCanvas(Form("cavasEnergy_%d", i),
-  //                                Form("Module %02d", i), 800, 600);
-  //   cavasEnergy[i]->Divide(4, 4);
-  //   for (uint32_t j = 0; j < nChannels; j++) {
-  //     cavasADC[i]->cd(j + 1);
-  //     histADC[i][j]->Draw();
-  //     cavasEnergy[i]->cd(j + 1);
-  //     histEnergy[i][j]->Draw();
-  //   }
-  //   // Save as PDF
-  //   cavasADC[i]->Print(Form("ADC_Module%02d.pdf", i));
-  //   cavasEnergy[i]->Print(Form("Energy_Module%02d.pdf", i));
-  // }
+  // Printout event statistics of correlation histograms
+  std::cout << "Correlation histograms:" << std::endl;
+  for (uint32_t i = 0; i < nSectors; i++) {
+    for (uint32_t j = 0; j < nSectors; j++) {
+      if (histSectorCorrelation[i][j]) {
+        std::cout << "Sector " << i << " vs Sector " << j << ": "
+                  << histSectorCorrelation[i][j]->GetEntries() << " entries"
+                  << std::endl;
+      }
+    }
+  }
+  std::cout << "Sector Correlation Sum: "
+            << histSectorCorrelationSum->GetEntries() << " entries"
+            << std::endl;
+  for (uint32_t i = 0; i < nRings; i++) {
+    for (uint32_t j = 0; j < nRings; j++) {
+      if (histRingCorrelation[i][j]) {
+        std::cout << "Ring " << i << " vs Ring " << j << ": "
+                  << histRingCorrelation[i][j]->GetEntries() << " entries"
+                  << std::endl;
+      }
+    }
+  }
+  std::cout << "Ring Correlation Sum: " << histRingCorrelationSum->GetEntries()
+            << " entries" << std::endl;
 
-  auto canvas = new TCanvas("canvas", "canvas", 800, 600);
-  histTime[16]->Draw("colz");
+  for (uint32_t i = 0; i < nRings; i++) {
+    if (histDERingESectorCorrelation[i]) {
+      std::cout << "dE Ring " << i << " vs E Sector" << ": "
+                << histDERingESectorCorrelation[i]->GetEntries() << " entries"
+                << std::endl;
+    }
+  }
+  std::cout << "dE Ring vs E Sector Sum: "
+            << histDERingESectorCorrelationSum->GetEntries() << " entries"
+            << std::endl;
+
+  std::cout << "Writing results to file..." << std::endl;
+  TFile outFile("results.root", "RECREATE");
+  outFile.cd();
+  outFile.mkdir("SectorSector");
+  outFile.mkdir("RingRing");
+  outFile.mkdir("DERingESector");
+  // Write corrilation histograms
+  outFile.cd("SectorSector");
+  for (uint32_t i = 0; i < nSectors; i++) {
+    for (uint32_t j = 0; j < nSectors; j++) {
+      if (histSectorCorrelation[i][j]) histSectorCorrelation[i][j]->Write();
+    }
+  }
+  if (histSectorCorrelationSum) histSectorCorrelationSum->Write();
+  outFile.cd("RingRing");
+  for (uint32_t i = 0; i < nRings; i++) {
+    for (uint32_t j = 0; j < nRings; j++) {
+      if (histRingCorrelation[i][j]) histRingCorrelation[i][j]->Write();
+    }
+  }
+  if (histRingCorrelationSum) histRingCorrelationSum->Write();
+  outFile.cd("DERingESector");
+  for (uint32_t i = 0; i < nRings; i++) {
+    if (histDERingESectorCorrelation[i]) {
+      histDERingESectorCorrelation[i]->Write();
+    }
+  }
+  if (histDERingESectorCorrelationSum) histDERingESectorCorrelationSum->Write();
+  // Write ADC and energy histograms
+  outFile.mkdir("ADC");
+  outFile.mkdir("Energy");
+  for (uint32_t i = 0; i < nModules; i++) {
+    for (uint32_t j = 0; j < nChannels; j++) {
+      outFile.cd("ADC");
+      if (histADC[i][j]) histADC[i][j]->Write();
+      outFile.cd("Energy");
+      if (histEnergy[i][j]) histEnergy[i][j]->Write();
+    }
+  }
 }
