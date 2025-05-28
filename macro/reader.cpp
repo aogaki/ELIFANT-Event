@@ -1,5 +1,6 @@
 #include <TCanvas.h>
 #include <TChain.h>
+#include <TCutG.h>
 #include <TF1.h>
 #include <TFile.h>
 #include <TH1.h>
@@ -7,7 +8,6 @@
 #include <TROOT.h>
 #include <TSystem.h>
 #include <TTree.h>
-#include <TCut.h>
 
 #include <chrono>
 #include <filesystem>
@@ -44,6 +44,25 @@ Double_t GetCalibratedEnergy(const DELILA::ChSettings_t &chSetting,
          chSetting.p3 * adc * adc * adc;
 }
 
+TCutG *cutg;
+void InitCuts()
+{
+  cutg = new TCutG("CUTG", 13);
+  cutg->SetPoint(0, 266.599, 5165.24);
+  cutg->SetPoint(1, 2681.09, 3957.04);
+  cutg->SetPoint(2, 5531.52, 3143.01);
+  cutg->SetPoint(3, 8180.75, 2551.77);
+  cutg->SetPoint(4, 11785.7, 2123.33);
+  cutg->SetPoint(5, 12607.3, 2037.65);
+  cutg->SetPoint(6, 12523.5, 1266.46);
+  cutg->SetPoint(7, 10712.6, 1352.15);
+  cutg->SetPoint(8, 6789.07, 1943.39);
+  cutg->SetPoint(9, 3703.89, 2680.3);
+  cutg->SetPoint(10, 954.058, 3879.92);
+  cutg->SetPoint(11, 165.996, 4454.03);
+  cutg->SetPoint(12, 266.599, 5165.24);
+}
+
 constexpr uint32_t nModules = 11;
 constexpr uint32_t nChannels = 32;
 TH1D *histADC[nModules][nChannels];
@@ -58,24 +77,8 @@ TH2D *histRingCorrelationSum;
 TH2D *histRingCorrelationSumGateTest;
 TH2D *histDERingESectorCorrelation[nRings];
 TH2D *histDERingESectorCorrelationSum;
-TCutG *cutg;
 void InitHists()
 {
-  cutg = new TCutG("CUTG",13);
-  cutg->SetPoint(0,266.599,5165.24);
-  cutg->SetPoint(1,2681.09,3957.04);
-  cutg->SetPoint(2,5531.52, 3143.01);
-  cutg->SetPoint(3,8180.75,2551.77);
-  cutg->SetPoint(4,11785.7,2123.33);
-  cutg->SetPoint(5,12607.3, 2037.65);
-  cutg->SetPoint(6,12523.5, 1266.46);
-  cutg->SetPoint(7,10712.6, 1352.15);
-  cutg->SetPoint(8,6789.07, 1943.39);
-  cutg->SetPoint(9,3703.89, 2680.3);
-  cutg->SetPoint(10,954.058, 3879.92);
-  cutg->SetPoint(11,165.996, 4454.03);
-  cutg->SetPoint(12,266.599, 5165.24);
-
   histEnergySum = new TH1D("histEnergySum", "Sum with cut", 32000, 0, 32000);
 
   auto settingsFileName = "./chSettings.json";
@@ -146,18 +149,17 @@ void InitHists()
                500, 0, 20000);
   histRingCorrelationSum->SetXTitle("[keV]");
   histRingCorrelationSum->SetYTitle("[keV]");
-  
+
   histRingCorrelationSumGateTest =
-      new TH2D("histRingCorrelationSumGatecheck", "Ring Correlation Sum", 500, 0, 20000,
-               500, 0, 20000);
+      new TH2D("histRingCorrelationSumGatecheck", "Ring Correlation Sum", 500,
+               0, 20000, 500, 0, 20000);
   histRingCorrelationSumGateTest->SetXTitle("[keV]");
   histRingCorrelationSumGateTest->SetYTitle("[keV]");
 
   for (uint32_t i = 0; i < nRings; i++) {
-    histDERingESectorCorrelation[i] =
-        new TH2D(Form("histDERingESectorCorrelation_%02d", i),
-                 Form("dE Ring %02d vs E All Sector", i), 500, 0, 20000, 500,
-                 0, 20000);
+    histDERingESectorCorrelation[i] = new TH2D(
+        Form("histDERingESectorCorrelation_%02d", i),
+        Form("dE Ring %02d vs E All Sector", i), 500, 0, 20000, 500, 0, 20000);
     histDERingESectorCorrelation[i]->SetXTitle("[keV]");
     histDERingESectorCorrelation[i]->SetYTitle("[keV]");
   }
@@ -208,15 +210,13 @@ void AnalysisThread(TString fileName, uint32_t threadID)
   UInt_t ringE = 0;
   UInt_t ringDE = 0;
 
-           
-  
   auto const nEntries = tree->GetEntries();
   {
     std::lock_guard<std::mutex> lock(counterMutex);
     totalEvents += nEntries;
   }
-  
- //   for (auto iEve = 0; iEve < 10000; iEve++) {
+
+  //   for (auto iEve = 0; iEve < 10000; iEve++) {
   for (auto iEve = 0; iEve < nEntries; iEve++) {
     tree->GetEntry(iEve);
     constexpr auto nProcess = 1000;
@@ -268,28 +268,29 @@ void AnalysisThread(TString fileName, uint32_t threadID)
             ringDE = (dEEvent.mod - 1) * 16 + dEEvent.ch;  // 0-47
             histRingCorrelation[ringDE][ringE]->Fill(eneE, eneDE);
             //histRingCorrelationSum->Fill(eneE, eneDE);
-            {    
-	      std::lock_guard<std::mutex> lock(counterMutex);
-            if(cutg->IsInside(eneE,eneDE)){
-            cutFlag = true;
-              histRingCorrelationSum->Fill(eneE, eneDE);
-            //histRingCorrelationSumGateTest->Fill(eneE, eneDE);
-             //std::cout << eneE<<"\t"<<eneDE<<std::endl;
-            }
+            {
+              std::lock_guard<std::mutex> lock(counterMutex);
+              if (cutg->IsInside(eneE, eneDE)) {
+                cutFlag = true;
+                histRingCorrelationSum->Fill(eneE, eneDE);
+                //histRingCorrelationSumGateTest->Fill(eneE, eneDE);
+                //std::cout << eneE<<"\t"<<eneDE<<std::endl;
+              }
             }
           }
         }
       }
     }
-if(cutFlag){    
-        for (auto &event : *eventData.eventDataVec) {
-      if (event.mod == 9) {  // Find E
-            auto chSetting = chSettingsVec.at(event.mod).at(event.ch);
-        eneE = GetCalibratedEnergy(chSetting, event.chargeLong);        
-histEnergySum->Fill(eneE);
-}
-     }
-     }
+
+    if (cutFlag) {
+      for (auto &event : *eventData.eventDataVec) {
+        if (event.mod == 9) {
+          auto chSetting = chSettingsVec.at(event.mod).at(event.ch);
+          eneE = GetCalibratedEnergy(chSetting, event.chargeLong);
+          histEnergySum->Fill(eneE);
+        }
+      }
+    }
   }
 
   IsFinished.at(threadID) = true;
@@ -298,12 +299,14 @@ histEnergySum->Fill(eneE);
 
 void reader()
 {
-  gSystem->Load("libEveBuilder.dylib");
+  gSystem->Load("libEveBuilder.dylib");  // For macOS
+  // gSystem->Load("libEveBuilder.so"); // For Linux
 
   ROOT::EnableThreadSafety();
 
+  std::cout << "Initializing..." << std::endl;
+  InitCuts();
   InitHists();
-  std::cout << "Initialized histograms." << std::endl;
 
   auto fileList = GetFileList("./");
 
