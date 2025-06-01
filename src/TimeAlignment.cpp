@@ -184,10 +184,11 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
     dataVec.reserve(nEvents);
     for (int64_t iEve = 0; iEve < nEvents; iEve++) {
       tree->GetEntry(iEve);
-      if (chargeLong > 100) {
+      auto threshold = fChSettingsVec[mod][ch].thresholdADC;
+      if (chargeLong > threshold) {
         fHistoADC[mod][ch]->Fill(chargeLong);
+        dataVec.emplace_back(mod, ch, fineTS / 1000.);  // ps -> ns
       }
-      dataVec.emplace_back(mod, ch, fineTS / 1000.);  // ps -> ns
     }
     file->Close();
     delete file;
@@ -196,7 +197,8 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
       return std::get<2>(a) < std::get<2>(b);
     });
 
-    for (int64_t iEve = 0; iEve < nEvents; iEve++) {
+    const auto nGoodEvents = dataVec.size();
+    for (int64_t iEve = 0; iEve < nGoodEvents; iEve++) {
       auto mod = std::get<0>(dataVec[iEve]);
       auto ch = std::get<1>(dataVec[iEve]);
       auto fineTS = std::get<2>(dataVec[iEve]);
@@ -206,7 +208,7 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
         int origMod = mod;
         int origCh = ch;
 
-        for (auto i = iEve + 1; i < nEvents; i++) {
+        for (auto i = iEve + 1; i < nGoodEvents; i++) {
           auto mod = std::get<0>(dataVec[i]);
           auto ch = std::get<1>(dataVec[i]);
           auto fineTS = std::get<2>(dataVec[i]);

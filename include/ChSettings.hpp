@@ -104,7 +104,7 @@ class ChSettings
         ch["Phi"] = 0.;
         ch["Theta"] = 0.;
         ch["Distance"] = 0.;
-        ch["ThresholdADC"] = 0;
+        ch["ThresholdADC"] = 50;
         ch["x"] = 0.;
         ch["y"] = 0.;
         ch["z"] = 0.;

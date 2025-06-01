@@ -14,7 +14,7 @@
         ]
     },
     {
-        "Name": "dE_more_than_0",
+        "Name": "dE_More_Than_0",
         "Type": "Flag",
         "Monitor": "dE_Sector_Counter",
         "Operator": ">",
