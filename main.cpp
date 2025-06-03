@@ -212,7 +212,7 @@ int main(int argc, char *argv[])
     }
 
     std::string l2SettingsFileName = "L2Settings.json";
-    std::cout << "What is the channel settings file name? (default: "
+    std::cout << "What is the L2 settings file name? (default: "
               << l2SettingsFileName << "): ";
     std::getline(std::cin, bufString);
     if (bufString != "") {
