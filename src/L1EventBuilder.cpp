@@ -63,6 +63,10 @@ void DELILA::L1EventBuilder::LoadTimeSettings(const std::string &fileName)
              iCh++) {
           fTimeSettingsVec[iRefMod][iRefCh][iMod][iCh] =
               timeJSON[iRefMod][iRefCh][iMod][iCh]["TimeOffset"];
+          if (iRefMod == iMod && iRefCh == iCh) {
+            fTimeSettingsVec[iRefMod][iRefCh][iMod][iCh] =
+                0.;  // Reference channel has no offset
+          }
         }
       }
     }

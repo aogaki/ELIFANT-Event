@@ -325,6 +325,9 @@ void DELILA::TimeAlignment::CalculateTimeAlignment()
         for (auto iCh = 0; iCh < fChSettingsVec[iMod].size(); iCh++) {
           auto timeOffset = timeSettingsVec[iRefMod][iRefCh][iMod][iCh];
           if (timeOffset != 0.) {
+            if (iRefMod == iMod && iRefCh == iCh) {
+              timeOffset = 0.;  // Reference channel has no offset
+            }
             std::cout << iRefMod << " " << iRefCh << " " << iMod << " " << iCh
                       << " TimeOffset: " << timeOffset << std::endl;
           }
