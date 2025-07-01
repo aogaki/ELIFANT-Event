@@ -81,7 +81,27 @@ These parameters are stored in `settings.json` and `chSettings.json`, which defi
 
 
 
-#### 3. Time Calibration & Event Reconstruction – L1 Event Building
+#### 3. Time Calibration
+
+Before performing event reconstruction, it is essential to generate time alignment corrections to synchronize all detector channels. This process calculates time offsets between channels to account for differences in cable lengths, electronics delays, and other timing variations:
+
+```bash
+./eve-builder -t
+```
+
+**Important:** Time calibration is performed only for channels with `"IsEventTrigger": true` in the `chSettings.json` configuration file. Non-trigger channels are excluded from the time alignment process.
+
+This step performs the following operations:
+
+1.  **Data Loading:** Processes the raw data files specified in the configuration to extract timing information from trigger-enabled detector channels only.
+2.  **Time Difference Histograms:** Creates 2D histograms showing time differences between each trigger detector channel and all other trigger channels in the system.
+3.  **Peak Finding:** Analyzes the time difference distributions to identify the peak positions (maximum histogram height), which represent the optimal time offsets needed for synchronization.
+4.  **Offset Calculation:** Calculates time alignment corrections based on the peak positions, with different binning strategies applied for different detector types (AC detectors: 10× rebinning, HPGe detectors: 100× rebinning). The timing information corresponds to the bin center where the histogram reaches its maximum height.
+5.  **Output Generation:** Saves the timing histograms to `timeAlignment.root` and generates `timeSettings.json` containing the calculated time offsets for each channel pair.
+
+The time calibration results are used automatically in subsequent L1 event building to ensure proper temporal alignment of all detector signals. **Note:** This calibration step should be performed whenever the experimental setup changes or when processing data from a new run series.
+
+#### 4. Event Reconstruction – L1 Event Building
 
 The initial event reconstruction stage, referred to as L1 event building, involves applying time calibration and identifying events based on trigger conditions. This process is initiated with:
 
@@ -99,7 +119,7 @@ This step performs the following operations:
 
 The time calibration algorithm employed is based on histogramming time differences between reference detectors and other channels, identifying the peak position as the optimal time offset. **Caution:** This method may be less effective with detectors exhibiting long decay tails (e.g., Germanium detectors). In such cases, a wider coincidence window and manual adjustment of time offsets are recommended.
 
-#### 4. Advanced Event Selection – L2 Event Selection
+#### 5. Advanced Event Selection – L2 Event Selection
 
 The L2 event selection stage allows for the application of user-defined criteria to further refine the event sample. This process requires a configuration file (`L2Settings.json`) defining logical conditions based on detector signals.  An example structure is provided below:
 
@@ -157,7 +177,7 @@ The software loads the L1 output file (`L1_N.root`), applies the criteria define
 
 
 
-#### 5. Data Analysis
+#### 6. Data Analysis
 
 The software package includes example C++ macros located in the `macro` directory to facilitate data analysis using ROOT. These macros demonstrate basic functionalities such as histogramming, fitting, and event selection. To execute a macro:
 
