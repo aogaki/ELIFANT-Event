@@ -26,6 +26,59 @@ function App() {
   // State for selected module
   const [selectedModule, setSelectedModule] = useState(0);
 
+  // Define property types for chSettings.json
+  const propertyTypes = {
+    ACChannel: 'integer',
+    ACModule: 'integer',
+    Channel: 'integer',
+    DetectorType: 'string',
+    Distance: 'float',
+    HasAC: 'boolean',
+    ID: 'integer',
+    IsEventTrigger: 'boolean',
+    Module: 'integer',
+    Phi: 'float',
+    Tags: 'array',
+    Theta: 'float',
+    ThresholdADC: 'integer',
+    p0: 'float',
+    p1: 'float',
+    p2: 'float',
+    p3: 'float',
+    x: 'float',
+    y: 'float',
+    z: 'float'
+  };
+
+  // Convert string value to appropriate type
+  const convertToType = (value, type) => {
+    if (value === null || value === undefined) return value;
+    
+    switch (type) {
+      case 'integer':
+        const intVal = parseInt(value, 10);
+        return isNaN(intVal) ? 0 : intVal;
+      case 'float':
+        const floatVal = parseFloat(value);
+        return isNaN(floatVal) ? 0.0 : floatVal;
+      case 'boolean':
+        if (typeof value === 'boolean') return value;
+        return value === 'true' || value === '1' || value === 1;
+      case 'string':
+        return String(value);
+      case 'array':
+        if (Array.isArray(value)) return value;
+        try {
+          const parsed = JSON.parse(value);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      default:
+        return value;
+    }
+  };
+
   // Load JSON file
   const handleFileChange = (e) => {
     const file = e.target.files[0];
@@ -46,7 +99,22 @@ function App() {
   // Handle cell edit for object
   const handleObjectChange = (key, value, originalValue) => {
     let newValue = value;
-    if (typeof originalValue === 'object') {
+    const expectedType = propertyTypes[key];
+    
+    if (expectedType === 'array') {
+      try {
+        newValue = JSON.parse(value);
+        if (!Array.isArray(newValue)) {
+          setError(`Invalid array format for key '${key}': Expected array`);
+          return;
+        }
+      } catch (e) {
+        setError(`Invalid JSON for key '${key}': ${e.message}`);
+        return;
+      }
+    } else if (expectedType) {
+      newValue = convertToType(value, expectedType);
+    } else if (typeof originalValue === 'object') {
       try {
         newValue = JSON.parse(value);
         setError("");
@@ -55,6 +123,8 @@ function App() {
         return;
       }
     }
+    
+    setError("");
     setData({ ...data, [key]: newValue });
   };
 
@@ -123,6 +193,28 @@ function App() {
     </table>
   );
 
+  // Get display value for input field
+  const getDisplayValue = (value, type) => {
+    if (value === null || value === undefined) return '';
+    if (type === 'array') {
+      return JSON.stringify(value);
+    }
+    return String(value);
+  };
+
+  // Get input type for HTML input
+  const getInputType = (type) => {
+    switch (type) {
+      case 'integer':
+      case 'float':
+        return 'number';
+      case 'boolean':
+        return 'checkbox';
+      default:
+        return 'text';
+    }
+  };
+
   // Render all channels in a selected module (editable, horizontal, Material UI)
   const renderAllChannelsInModule = (arr) => {
     if (!Array.isArray(arr) || arr.length === 0) return null;
@@ -131,7 +223,22 @@ function App() {
     const allKeys = Array.from(new Set(module.flatMap(ch => typeof ch === 'object' && ch !== null ? Object.keys(ch) : [])));
     const handleChannelValueChange = (channelIdx, key, value, originalValue) => {
       let newValue = value;
-      if (typeof originalValue === 'object') {
+      const expectedType = propertyTypes[key];
+      
+      if (expectedType === 'array') {
+        try {
+          newValue = JSON.parse(value);
+          if (!Array.isArray(newValue)) {
+            setError(`Invalid array format for channel ${channelIdx}, key '${key}': Expected array`);
+            return;
+          }
+        } catch (e) {
+          setError(`Invalid JSON for channel ${channelIdx}, key '${key}': ${e.message}`);
+          return;
+        }
+      } else if (expectedType) {
+        newValue = convertToType(value, expectedType);
+      } else if (typeof originalValue === 'object') {
         try {
           newValue = JSON.parse(value);
         } catch (e) {
@@ -139,6 +246,7 @@ function App() {
           return;
         }
       }
+      
       setError("");
       const newData = data.map((mod, mIdx) =>
         mIdx === selectedModule
@@ -149,6 +257,7 @@ function App() {
       );
       setData(newData);
     };
+
     return (
       <Box sx={{ margin: '10px 0', padding: 2, border: '1px solid #ccc', background: '#f5f5f5', overflowX: 'auto' }}>
         <Typography variant="h6" gutterBottom>All Channels in Module {selectedModule}:</Typography>
@@ -165,16 +274,36 @@ function App() {
             <TableBody>
               {allKeys.map((k) => (
                 <TableRow key={k}>
-                  <TableCell sx={{ position: 'sticky', left: 0, background: '#f5f5f5', zIndex: 1 }}>{k}</TableCell>
+                  <TableCell sx={{ position: 'sticky', left: 0, background: '#f5f5f5', zIndex: 1 }}>
+                    {k}
+                    <br />
+                    <Typography variant="caption" color="text.secondary">
+                      ({propertyTypes[k] || 'unknown'})
+                    </Typography>
+                  </TableCell>
                   {module.map((channel, idx) => (
                     <TableCell key={idx}>
                       {typeof channel === 'object' && channel !== null && k in channel ? (
-                        <TextField
-                          size="small"
-                          value={typeof channel[k] === 'object' ? JSON.stringify(channel[k]) : channel[k]}
-                          onChange={e => handleChannelValueChange(idx, k, e.target.value, channel[k])}
-                          sx={{ width: 180, height: 28, '& .MuiInputBase-input': { padding: '4px 8px', height: '20px' } }}
-                        />
+                        propertyTypes[k] === 'boolean' ? (
+                          <input
+                            type="checkbox"
+                            checked={Boolean(channel[k])}
+                            onChange={e => handleChannelValueChange(idx, k, e.target.checked, channel[k])}
+                            style={{ transform: 'scale(1.2)' }}
+                          />
+                        ) : (
+                          <TextField
+                            size="small"
+                            type={getInputType(propertyTypes[k])}
+                            value={getDisplayValue(channel[k], propertyTypes[k])}
+                            onChange={e => handleChannelValueChange(idx, k, e.target.value, channel[k])}
+                            inputProps={{
+                              step: propertyTypes[k] === 'float' ? 'any' : undefined,
+                              min: propertyTypes[k] === 'integer' ? 0 : undefined
+                            }}
+                            sx={{ width: 180, height: 28, '& .MuiInputBase-input': { padding: '4px 8px', height: '20px' } }}
+                          />
+                        )
                       ) : ''}
                     </TableCell>
                   ))}
