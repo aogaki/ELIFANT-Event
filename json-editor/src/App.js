@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   Box,
   Button,
@@ -17,6 +17,8 @@ import {
   Typography,
   Alert
 } from "@mui/material";
+import InputTest from "./InputTest";
+import ArrayInput from "./ArrayInput";
 
 function App() {
   const [data, setData] = useState(null);
@@ -79,6 +81,33 @@ function App() {
     }
   };
 
+  // Parse string array input with better error handling
+  const parseStringArray = (value) => {
+    if (Array.isArray(value)) return value;
+    if (typeof value !== 'string') return [];
+    
+    // Remove whitespace
+    value = value.trim();
+    
+    // If empty, return empty array
+    if (!value) return [];
+    
+    // If it looks like JSON array, try to parse it
+    if (value.startsWith('[') && value.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (e) {
+        // If JSON parsing fails, treat as invalid
+        throw new Error('Invalid JSON array format. Use format: ["item1", "item2"] or item1, item2');
+      }
+    }
+    
+    // If it doesn't look like JSON, treat as comma-separated values
+    // Split by comma and clean up each item
+    return value.split(',').map(item => item.trim()).filter(item => item.length > 0);
+  };
+
   // Load JSON file
   const handleFileChange = (e) => {
     const file = e.target.files[0];
@@ -98,18 +127,17 @@ function App() {
 
   // Handle cell edit for object
   const handleObjectChange = (key, value, originalValue) => {
+    console.log(`handleObjectChange: key=${key}, value="${value}", type=${propertyTypes[key]}`);
+    
     let newValue = value;
     const expectedType = propertyTypes[key];
     
     if (expectedType === 'array') {
       try {
-        newValue = JSON.parse(value);
-        if (!Array.isArray(newValue)) {
-          setError(`Invalid array format for key '${key}': Expected array`);
-          return;
-        }
+        newValue = parseStringArray(value);
+        setError("");
       } catch (e) {
-        setError(`Invalid JSON for key '${key}': ${e.message}`);
+        setError(`Invalid array format for key '${key}': ${e.message}`);
         return;
       }
     } else if (expectedType) {
@@ -160,9 +188,20 @@ function App() {
             <td>
               <input
                 type="text"
-                value={typeof value === 'object' ? JSON.stringify(value, null, 2) : value}
+                value={getDisplayValue(value, propertyTypes[key])}
                 onChange={e => handleObjectChange(key, e.target.value, value)}
-                style={{ width: 300 }}
+                onKeyDown={(e) => {
+                  // Ensure commas and spaces are allowed for array inputs
+                  if (propertyTypes[key] === 'array') {
+                    console.log('KeyDown for array input (object table):', e.key, e.keyCode);
+                    return;
+                  }
+                }}
+                placeholder={propertyTypes[key] === 'array' ? 'Enter comma-separated values or ["item1", "item2"]' : undefined}
+                style={{ 
+                  width: 300,
+                  ...(propertyTypes[key] === 'array' ? { fontFamily: 'monospace' } : {})
+                }}
               />
             </td>
           </tr>
@@ -197,6 +236,16 @@ function App() {
   const getDisplayValue = (value, type) => {
     if (value === null || value === undefined) return '';
     if (type === 'array') {
+      if (Array.isArray(value)) {
+        // For string arrays, show a more user-friendly format
+        if (value.length === 0) return '';
+        // If all items are strings, show as comma-separated values
+        if (value.every(item => typeof item === 'string')) {
+          return value.join(', ');
+        }
+        // Otherwise, show as JSON
+        return JSON.stringify(value);
+      }
       return JSON.stringify(value);
     }
     return String(value);
@@ -222,20 +271,15 @@ function App() {
     if (!Array.isArray(module) || module.length === 0) return <Typography>No channels in selected module.</Typography>;
     const allKeys = Array.from(new Set(module.flatMap(ch => typeof ch === 'object' && ch !== null ? Object.keys(ch) : [])));
     const handleChannelValueChange = (channelIdx, key, value, originalValue) => {
+      console.log(`handleChannelValueChange: channel=${channelIdx}, key=${key}, value=`, value, `type=${propertyTypes[key]}`);
+      
       let newValue = value;
       const expectedType = propertyTypes[key];
       
       if (expectedType === 'array') {
-        try {
-          newValue = JSON.parse(value);
-          if (!Array.isArray(newValue)) {
-            setError(`Invalid array format for channel ${channelIdx}, key '${key}': Expected array`);
-            return;
-          }
-        } catch (e) {
-          setError(`Invalid JSON for channel ${channelIdx}, key '${key}': ${e.message}`);
-          return;
-        }
+        // ArrayInput already provides the parsed array
+        newValue = value;
+        setError("");
       } else if (expectedType) {
         newValue = convertToType(value, expectedType);
       } else if (typeof originalValue === 'object') {
@@ -291,6 +335,12 @@ function App() {
                             onChange={e => handleChannelValueChange(idx, k, e.target.checked, channel[k])}
                             style={{ transform: 'scale(1.2)' }}
                           />
+                        ) : propertyTypes[k] === 'array' ? (
+                          <ArrayInput
+                            value={channel[k]}
+                            onChange={(arrayValue) => handleChannelValueChange(idx, k, arrayValue, channel[k])}
+                            placeholder="Type comma-separated values"
+                          />
                         ) : (
                           <TextField
                             size="small"
@@ -319,6 +369,10 @@ function App() {
   return (
     <Box sx={{ padding: 3 }}>
       <Typography variant="h4" gutterBottom>chSettings.json Editor</Typography>
+      
+      {/* Add test component for debugging */}
+      <InputTest />
+      
       <input type="file" accept="application/json" onChange={handleFileChange} />
       {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
       {data && (
