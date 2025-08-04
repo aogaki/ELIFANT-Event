@@ -37,7 +37,14 @@ set(MY_DICTIONARY "G__${LIB_NAME}")
 ROOT_GENERATE_DICTIONARY(${MY_DICTIONARY} ${headers} LINKDEF ${MY_LINKDEF})
 
 # ----------------------------------------------------------------------------
-set(CMAKE_SHARED_LIBRARY_SUFFIX ".so")
+# OS-specific library extension handling
+if(APPLE)
+    set(CMAKE_SHARED_LIBRARY_SUFFIX ".dylib")
+elseif(UNIX)
+    set(CMAKE_SHARED_LIBRARY_SUFFIX ".so")
+elseif(WIN32)
+    set(CMAKE_SHARED_LIBRARY_SUFFIX ".dll")
+endif()
 add_library(${LIB_NAME} SHARED ${sources} ${headers} "${MY_DICTIONARY}.cxx")
 target_link_libraries(${LIB_NAME} ${ROOT_LIBRARIES} RHTTP Spectrum)
 

@@ -31,6 +31,7 @@
 *.out
 *.app
 build
+build_test
 .vscode
 .DS_Store
 E9
@@ -40,3 +41,7 @@ all_run*
 compile_commands.json
 node_modules
 package-lock.json
+.cache
+.claude
+.serena
+*.root

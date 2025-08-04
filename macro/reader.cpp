@@ -299,8 +299,16 @@ void AnalysisThread(TString fileName, uint32_t threadID)
 
 void reader()
 {
-  gSystem->Load("libEveBuilder.dylib");  // For macOS
-  // gSystem->Load("libEveBuilder.so"); // For Linux
+  // Load library with OS-specific extension
+#ifdef __APPLE__
+  gSystem->Load("libEveBuilder.dylib");
+#elif defined(__linux__) || defined(__unix__)
+  gSystem->Load("libEveBuilder.so");
+#elif defined(_WIN32) || defined(_WIN64)
+  gSystem->Load("libEveBuilder.dll");
+#else
+  #error "Unknown operating system"
+#endif
 
   ROOT::EnableThreadSafety();
 
