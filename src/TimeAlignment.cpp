@@ -12,6 +12,9 @@
 #include <thread>
 #include <tuple>
 
+// Define USE_MUTEX_APPROACH to compare performance
+// #define USE_MUTEX_APPROACH
+
 DELILA::TimeAlignment::TimeAlignment()
 {
   // Constructor
@@ -128,6 +131,40 @@ void DELILA::TimeAlignment::FillHistograms(const int nThreads)
   ROOT::DisableImplicitMT();
   ROOT::EnableThreadSafety();
 
+  // Initialize thread-local histograms
+  auto maxID = 0;
+  for (size_t i = 0; i < fChSettingsVec.size(); i++) {
+    for (size_t j = 0; j < fChSettingsVec[i].size(); j++) {
+      maxID = std::max(maxID, static_cast<int>(fChSettingsVec[i][j].ID));
+    }
+  }
+  maxID += 1;
+
+#ifndef USE_MUTEX_APPROACH
+  fThreadHistograms.resize(nThreads);
+  for (int t = 0; t < nThreads; ++t) {
+    fThreadHistograms[t].histoTime.resize(fChSettingsVec.size());
+    fThreadHistograms[t].histoADC.resize(fChSettingsVec.size());
+    for (size_t i = 0; i < fChSettingsVec.size(); i++) {
+      fThreadHistograms[t].histoTime[i].resize(fChSettingsVec[i].size());
+      fThreadHistograms[t].histoADC[i].resize(fChSettingsVec[i].size());
+      for (size_t j = 0; j < fChSettingsVec[i].size(); j++) {
+        int nBins = 20 * fTimeWindow;
+        TString histName = Form("hTime_%02zu_%02zu_thread%d", i, j, t);
+        fThreadHistograms[t].histoTime[i][j] =
+            std::make_unique<TH2D>(histName, histName, nBins, -fTimeWindow,
+                                   fTimeWindow, maxID, 0, maxID);
+        fThreadHistograms[t].histoTime[i][j]->SetDirectory(0);
+
+        histName = Form("hADC_%02zu_%02zu_thread%d", i, j, t);
+        fThreadHistograms[t].histoADC[i][j] =
+            std::make_unique<TH1D>(histName, histName, 32000, 0, 32000);
+        fThreadHistograms[t].histoADC[i][j]->SetDirectory(0);
+      }
+    }
+  }
+#endif
+
   std::vector<std::thread> threads;
   fDataProcessFlag = true;
   for (int i = 0; i < nThreads; ++i) {
@@ -139,6 +176,10 @@ void DELILA::TimeAlignment::FillHistograms(const int nThreads)
       thread.join();
     }
   }
+
+#ifndef USE_MUTEX_APPROACH
+  MergeThreadHistograms();
+#endif
   SaveHistograms();
 }
 
@@ -186,7 +227,14 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
       tree->GetEntry(iEve);
       auto threshold = fChSettingsVec[mod][ch].thresholdADC;
       if (chargeLong > threshold) {
-        fHistoADC[mod][ch]->Fill(chargeLong);
+#ifdef USE_MUTEX_APPROACH
+        {
+          std::lock_guard<std::mutex> lock(fHistogramMutex);
+          fHistoADC[mod][ch]->Fill(chargeLong);
+        }
+#else
+        fThreadHistograms[threadID].histoADC[mod][ch]->Fill(chargeLong);
+#endif
         dataVec.emplace_back(mod, ch, fineTS / 1000.);  // ps -> ns
       }
     }
@@ -217,8 +265,16 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
           if (timeDiff > fTimeWindow) {
             break;
           }
-          fHistoTime[origMod][origCh]->Fill(timeDiff,
-                                            fChSettingsVec[mod][ch].ID);
+#ifdef USE_MUTEX_APPROACH
+          {
+            std::lock_guard<std::mutex> lock(fHistogramMutex);
+            fHistoTime[origMod][origCh]->Fill(timeDiff,
+                                              fChSettingsVec[mod][ch].ID);
+          }
+#else
+          fThreadHistograms[threadID].histoTime[origMod][origCh]->Fill(
+              timeDiff, fChSettingsVec[mod][ch].ID);
+#endif
         }
         for (auto i = iEve - 1; i >= 0; i--) {
           auto mod = std::get<0>(dataVec[i]);
@@ -229,8 +285,16 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
           if (timeDiff < -fTimeWindow) {
             break;
           }
-          fHistoTime[origMod][origCh]->Fill(timeDiff,
-                                            fChSettingsVec[mod][ch].ID);
+#ifdef USE_MUTEX_APPROACH
+          {
+            std::lock_guard<std::mutex> lock(fHistogramMutex);
+            fHistoTime[origMod][origCh]->Fill(timeDiff,
+                                              fChSettingsVec[mod][ch].ID);
+          }
+#else
+          fThreadHistograms[threadID].histoTime[origMod][origCh]->Fill(
+              timeDiff, fChSettingsVec[mod][ch].ID);
+#endif
         }
       }
     }
@@ -240,6 +304,45 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
     std::lock_guard<std::mutex> lock(fFileListMutex);
     std::cout << "Thread " << threadID << " finished." << std::endl;
   }
+}
+
+void DELILA::TimeAlignment::MergeThreadHistograms()
+{
+  std::cout << "Merging thread histograms..." << std::endl;
+
+  // Merge all thread-local histograms into the main histograms
+  for (size_t i = 0; i < fChSettingsVec.size(); i++) {
+    for (size_t j = 0; j < fChSettingsVec[i].size(); j++) {
+      // Move first thread's histogram as base
+      if (fThreadHistograms.size() > 0 && fThreadHistograms[0].histoTime[i][j]) {
+        fHistoTime[i][j] = std::move(fThreadHistograms[0].histoTime[i][j]);
+        fHistoADC[i][j] = std::move(fThreadHistograms[0].histoADC[i][j]);
+
+        // Add all other threads' histograms
+        for (size_t t = 1; t < fThreadHistograms.size(); t++) {
+          if (fThreadHistograms[t].histoTime[i][j]) {
+            fHistoTime[i][j]->Add(fThreadHistograms[t].histoTime[i][j].get());
+          }
+          if (fThreadHistograms[t].histoADC[i][j]) {
+            fHistoADC[i][j]->Add(fThreadHistograms[t].histoADC[i][j].get());
+          }
+        }
+
+        // Rename to final names
+        TString histName = Form("hTime_%02zu_%02zu", i, j);
+        fHistoTime[i][j]->SetName(histName);
+        fHistoTime[i][j]->SetTitle(histName);
+
+        histName = Form("hADC_%02zu_%02zu", i, j);
+        fHistoADC[i][j]->SetName(histName);
+        fHistoADC[i][j]->SetTitle(histName);
+      }
+    }
+  }
+
+  // Clear thread histograms to free memory
+  fThreadHistograms.clear();
+  std::cout << "Histogram merging completed." << std::endl;
 }
 
 void DELILA::TimeAlignment::CalculateTimeAlignment()

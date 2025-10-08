@@ -276,6 +276,11 @@ int main(int argc, char *argv[])
     timeAlign->FillHistograms(nThread);
     timeAlign->CalculateTimeAlignment();
     std::cout << "Time alignment information generated." << std::endl;
+
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::seconds>(end - start);
+    std::cout << "Time taken: " << duration.count() << " seconds." << std::endl;
+
     return 0;
   } else if (buildType == BuildType::L1) {
     std::cout << "Generating L1 trigger information..." << std::endl;

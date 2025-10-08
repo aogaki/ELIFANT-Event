@@ -39,7 +39,17 @@ class TimeAlignment
   bool fDataProcessFlag = false;
   std::vector<std::string> fFileList;
   std::mutex fFileListMutex;
+  std::mutex fHistogramMutex;  // For mutex-based approach
+
+  // Thread-local histograms for parallel filling
+  struct ThreadHistograms {
+    std::vector<std::vector<std::unique_ptr<TH2D>>> histoTime;
+    std::vector<std::vector<std::unique_ptr<TH1D>>> histoADC;
+  };
+  std::vector<ThreadHistograms> fThreadHistograms;
+
   void DataProcess(int threadID);
+  void MergeThreadHistograms();
   void SaveHistograms();
 
   // For fitting ADC spectrum
