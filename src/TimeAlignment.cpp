@@ -64,7 +64,7 @@ void DELILA::TimeAlignment::InitHistograms()
     fHistoTime[i].resize(fChSettingsVec[i].size());
     fHistoADC[i].resize(fChSettingsVec[i].size());
     for (size_t j = 0; j < fChSettingsVec[i].size(); j++) {
-      int nBins = 20 * fTimeWindow;
+      int nBins = fTimeWindow;
       TString histName = Form("hTime_%02zu_%02zu", i, j);
       fHistoTime[i][j] =
           std::make_unique<TH2D>(histName, histName, nBins, -fTimeWindow,
@@ -149,7 +149,7 @@ void DELILA::TimeAlignment::FillHistograms(const int nThreads)
       fThreadHistograms[t].histoTime[i].resize(fChSettingsVec[i].size());
       fThreadHistograms[t].histoADC[i].resize(fChSettingsVec[i].size());
       for (size_t j = 0; j < fChSettingsVec[i].size(); j++) {
-        int nBins = 20 * fTimeWindow;
+        int nBins = fTimeWindow;
         TString histName = Form("hTime_%02zu_%02zu_thread%d", i, j, t);
         fThreadHistograms[t].histoTime[i][j] =
             std::make_unique<TH2D>(histName, histName, nBins, -fTimeWindow,
@@ -225,6 +225,12 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
     dataVec.reserve(nEvents);
     for (int64_t iEve = 0; iEve < nEvents; iEve++) {
       tree->GetEntry(iEve);
+
+      // Bounds checking to prevent segmentation fault
+      if (mod >= fChSettingsVec.size() || ch >= fChSettingsVec[mod].size()) {
+        continue;
+      }
+
       auto threshold = fChSettingsVec[mod][ch].thresholdADC;
       if (chargeLong > threshold) {
 #ifdef USE_MUTEX_APPROACH
@@ -314,7 +320,8 @@ void DELILA::TimeAlignment::MergeThreadHistograms()
   for (size_t i = 0; i < fChSettingsVec.size(); i++) {
     for (size_t j = 0; j < fChSettingsVec[i].size(); j++) {
       // Move first thread's histogram as base
-      if (fThreadHistograms.size() > 0 && fThreadHistograms[0].histoTime[i][j]) {
+      if (fThreadHistograms.size() > 0 &&
+          fThreadHistograms[0].histoTime[i][j]) {
         fHistoTime[i][j] = std::move(fThreadHistograms[0].histoTime[i][j]);
         fHistoADC[i][j] = std::move(fThreadHistograms[0].histoADC[i][j]);
 
