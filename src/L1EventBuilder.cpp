@@ -4,6 +4,7 @@
 #include <TROOT.h>
 #include <TTree.h>
 
+#include <DELILAExceptions.hpp>
 #include <EventData.hpp>
 #include <algorithm>
 #include <csignal>
@@ -29,38 +30,45 @@ DELILA::L1EventBuilder::~L1EventBuilder() {}
 
 void DELILA::L1EventBuilder::LoadChSettings(const std::string &fileName)
 {
-  fChSettingsVec = ChSettings::GetChSettings(fileName);
-  if (fChSettingsVec.size() == 0) {
-    std::cerr << "Error: No channel settings found in file: " << fileName
-              << std::endl;
-    return;
+  try {
+    fChSettingsVec = ChSettings::GetChSettings(fileName);
+    if (fChSettingsVec.size() == 0) {
+      throw DELILA::ConfigException("No channel settings found in file: " + fileName);
+    }
+  } catch (const DELILA::ConfigException &e) {
+    throw;  // Re-throw DELILA exceptions as-is
+  } catch (const std::exception &e) {
+    throw DELILA::ConfigException("Failed to load channel settings from " + fileName +
+                          ": " + e.what());
   }
 }
 
 void DELILA::L1EventBuilder::LoadFileList(
     const std::vector<std::string> &fileList)
 {
-  fFileList = fileList;
-  if (fFileList.size() == 0) {
-    std::cerr << "Error: No files found." << std::endl;
-    return;
+  if (fileList.empty()) {
+    throw DELILA::ValidationException("File list is empty");
   }
+  fFileList = fileList;
 }
 
 void DELILA::L1EventBuilder::LoadTimeSettings(const std::string &fileName)
 {
   auto jsonFile = std::ifstream(fileName);
   if (!jsonFile) {
-    std::cerr << "Error: Could not open time settings file: " << fileName
-              << std::endl;
-    return;
+    throw DELILA::FileException("Could not open time settings file: " + fileName);
   }
+
   nlohmann::json timeJSON;
-  jsonFile >> timeJSON;
-  if (timeJSON.size() == 0) {
-    std::cerr << "Error: No time settings found in file: " << fileName
-              << std::endl;
-    return;
+  try {
+    jsonFile >> timeJSON;
+  } catch (const nlohmann::json::exception &e) {
+    throw DELILA::JSONException("Invalid JSON in time settings file " + fileName +
+                                ": " + e.what());
+  }
+
+  if (timeJSON.empty()) {
+    throw DELILA::ConfigException("No time settings found in file: " + fileName);
   }
 
   fTimeSettingsVec.clear();
@@ -99,6 +107,21 @@ void DELILA::L1EventBuilder::LoadTimeSettings(const std::string &fileName)
 
 void DELILA::L1EventBuilder::BuildEvent(const uint32_t nThreads)
 {
+  // Validate inputs
+  if (nThreads == 0 || nThreads > 128) {
+    throw DELILA::ValidationException("Thread count must be between 1 and 128, got: " +
+                                      std::to_string(nThreads));
+  }
+
+  if (fFileList.empty()) {
+    throw DELILA::ValidationException("File list is empty. Call LoadFileList first.");
+  }
+
+  if (fChSettingsVec.empty()) {
+    throw DELILA::ConfigException(
+        "Channel settings not loaded. Call LoadChSettings first.");
+  }
+
   // For sequential data read and multi threading by user code.
   // Disable implicit multi-threading is faster now. ROOT 6.34.08
   ROOT::DisableImplicitMT();
@@ -111,28 +134,25 @@ void DELILA::L1EventBuilder::BuildEvent(const uint32_t nThreads)
 
   // Validate reference channel configuration
   if (fTimeSettingsVec.empty()) {
-    std::cerr << "Error: Time settings not loaded!" << std::endl;
-    return;
+    throw DELILA::ConfigException("Time settings not loaded. Call LoadTimeSettings first.");
   }
+
   if (fRefMod >= fTimeSettingsVec.size()) {
-    std::cerr << "Error: TimeReferenceMod (" << static_cast<int>(fRefMod)
-              << ") is out of bounds! Time settings has "
-              << fTimeSettingsVec.size() << " modules." << std::endl;
-    std::cerr << "Please check your settings.json and timeSettings.json files."
-              << std::endl;
-    return;
+    throw DELILA::RangeException(
+        "TimeReferenceMod (" + std::to_string(fRefMod) +
+        ") is out of bounds! Time settings has " +
+        std::to_string(fTimeSettingsVec.size()) +
+        " modules. Please check your settings.json and timeSettings.json files.");
   }
+
   if (fRefCh >= fTimeSettingsVec[fRefMod].size()) {
-    std::cerr << "Error: TimeReferenceCh (" << static_cast<int>(fRefCh)
-              << ") is out of bounds! Time settings for module " << static_cast<int>(fRefMod)
-              << " has " << fTimeSettingsVec[fRefMod].size() << " channels."
-              << std::endl;
-    std::cerr << "Please check your settings.json and timeSettings.json files."
-              << std::endl;
-    std::cerr << "Either regenerate timeSettings.json with './eve-builder -t'"
-              << std::endl;
-    std::cerr << "or set TimeReferenceCh to 0 in settings.json." << std::endl;
-    return;
+    throw DELILA::RangeException(
+        "TimeReferenceCh (" + std::to_string(fRefCh) +
+        ") is out of bounds! Time settings for module " +
+        std::to_string(fRefMod) + " has " +
+        std::to_string(fTimeSettingsVec[fRefMod].size()) +
+        " channels. Either regenerate timeSettings.json with './eve-builder -t' " +
+        "or set TimeReferenceCh to 0 in settings.json.");
   }
 
   std::cout << "Using reference: Module " << static_cast<int>(fRefMod)
@@ -229,6 +249,18 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
     rawDataVec.reserve(nEntries);
     for (Long64_t iEve = 0; iEve < nEntries; iEve++) {
       tree->GetEntry(iEve);
+
+      // Bounds checking to prevent segmentation fault
+      if (mod >= fChSettingsVec.size() || ch >= fChSettingsVec[mod].size()) {
+        continue;
+      }
+
+      // Check if mod/ch are within bounds for time settings array
+      if (mod >= fTimeSettingsVec[fRefMod][fRefCh].size() ||
+          ch >= fTimeSettingsVec[fRefMod][fRefCh][mod].size()) {
+        continue;
+      }
+
       if (chargeLong > fChSettingsVec[mod][ch].thresholdADC) {
         auto ts = fineTS / 1000.;  // ps to ns
         ts -= fTimeSettingsVec[fRefMod][fRefCh][mod][ch];
@@ -314,6 +346,12 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
           for (auto &hit : *(eventData.eventDataVec)) {
             auto mod = hit.mod;
             auto ch = hit.ch;
+
+            // Bounds checking to prevent segmentation fault
+            if (mod >= fChSettingsVec.size() || ch >= fChSettingsVec[mod].size()) {
+              continue;
+            }
+
             if (fChSettingsVec[mod][ch].hasAC) {
               auto acMod = fChSettingsVec[mod][ch].ACMod;
               auto acCh = fChSettingsVec[mod][ch].ACCh;

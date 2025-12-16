@@ -159,3 +159,13 @@
 - [ ] Consider memory pooling for frequent allocations
 - [ ] Optimize thread work distribution
 - [ ] Add performance benchmarks
+
+### ⚠️ KISS Principle Reminder
+
+When optimizing performance:
+- **ALWAYS profile first**: Don't optimize what you haven't measured
+- **Fix the right problem**: 90% of time is spent in 10% of code - find that 10%
+- **Readable beats fast**: Premature optimization makes code hard to maintain
+- **Simple wins**: Often a simple algorithm change beats micro-optimizations
+- **Question complexity**: Work-stealing thread pools sound cool, but do you really need them?
+- **Measure everything**: Add benchmarks before and after - did it actually help?

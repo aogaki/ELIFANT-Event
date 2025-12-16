@@ -106,3 +106,12 @@
 - [ ] Add thread sanitizer to build for testing
 - [ ] Document thread safety guarantees for each class
 - [ ] Consider using parallel STL algorithms where appropriate
+
+### ⚠️ KISS Principle Reminder
+
+When implementing thread safety improvements:
+- **Start simple**: Use `std::mutex` before considering lock-free algorithms
+- **Profile first**: Don't assume lock contention is a problem without measuring
+- **Avoid complexity**: Lock-free data structures are hard to get right - only use when proven necessary
+- **Document clearly**: Thread safety is already complex - make your code easy to understand
+- **Incremental fixes**: Fix one race condition at a time rather than rewriting everything

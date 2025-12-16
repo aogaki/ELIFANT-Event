@@ -138,3 +138,12 @@
 - [ ] Implement file manager class with RAII
 - [ ] Add resource leak detection in tests
 - [ ] Document RAII patterns used in the project
+
+### ⚠️ KISS Principle Reminder
+
+When implementing RAII patterns:
+- **Wrap what matters**: Not every resource needs a custom RAII class - use standard smart pointers first
+- **One responsibility**: Each RAII wrapper should manage exactly one resource
+- **Don't over-abstract**: A simple `std::unique_ptr<TFile>` is better than a complex custom wrapper
+- **ROOT compatibility**: ROOT has its own ownership model - respect it, don't fight it
+- **Progressive adoption**: Convert to RAII incrementally, starting with the most problematic areas

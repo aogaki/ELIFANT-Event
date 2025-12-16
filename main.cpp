@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "ChSettings.hpp"
+#include "DELILAExceptions.hpp"
 #include "L1EventBuilder.hpp"
 #include "L2EventBuilder.hpp"
 #include "TimeAlignment.hpp"
@@ -266,47 +267,77 @@ int main(int argc, char *argv[])
 
   auto start = std::chrono::high_resolution_clock::now();
 
-  if (buildType == BuildType::Time) {
-    std::cout << "Generating time alignment information..." << std::endl;
-    auto timeAlign = std::make_unique<DELILA::TimeAlignment>();
-    timeAlign->LoadChSettings(chSettingsFileName);
-    timeAlign->LoadFileList(fileList);
-    timeAlign->SetTimeWindow(timeWindow);
-    timeAlign->InitHistograms();
-    timeAlign->FillHistograms(nThread);
-    timeAlign->CalculateTimeAlignment();
-    std::cout << "Time alignment information generated." << std::endl;
+  try {
+    if (buildType == BuildType::Time) {
+      std::cout << "Generating time alignment information..." << std::endl;
+      auto timeAlign = std::make_unique<DELILA::TimeAlignment>();
+      timeAlign->LoadChSettings(chSettingsFileName);
+      timeAlign->LoadFileList(fileList);
+      timeAlign->SetTimeWindow(timeWindow);
+      timeAlign->InitHistograms();
+      timeAlign->FillHistograms(nThread);
+      timeAlign->CalculateTimeAlignment();
+      std::cout << "Time alignment information generated." << std::endl;
+
+      auto end = std::chrono::high_resolution_clock::now();
+      auto duration =
+          std::chrono::duration_cast<std::chrono::seconds>(end - start);
+      std::cout << "Time taken: " << duration.count() << " seconds."
+                << std::endl;
+
+      return 0;
+    } else if (buildType == BuildType::L1) {
+      std::cout << "Generating L1 trigger information..." << std::endl;
+      auto l1EventBuilder = std::make_unique<DELILA::L1EventBuilder>();
+      l1EventBuilder->LoadChSettings(chSettingsFileName);
+      l1EventBuilder->LoadFileList(fileList);
+      l1EventBuilder->LoadTimeSettings(DELILA::kTimeSettingsFileName);
+      l1EventBuilder->SetRefMod(refMod);
+      l1EventBuilder->SetRefCh(refCh);
+      l1EventBuilder->SetTimeWindow(timeWindow);
+      l1EventBuilder->SetCoincidenceWindow(coincidenceWindow);
+      l1EventBuilder->BuildEvent(nThread);
+      std::cout << "L1 trigger event file generated." << std::endl;
+    } else if (buildType == BuildType::L2) {
+      std::cout << "Generating L2 trigger information..." << std::endl;
+      auto l2EventBuilder = std::make_unique<DELILA::L2EventBuilder>();
+      l2EventBuilder->LoadChSettings(chSettingsFileName);
+      l2EventBuilder->SetCoincidenceWindow(coincidenceWindow);
+      l2EventBuilder->LoadL2Settings(l2SettingsFileName);
+      l2EventBuilder->BuildEvent(nThread);
+      std::cout << "L2 trigger event file generated." << std::endl;
+    }
 
     auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::seconds>(end - start);
+    auto duration =
+        std::chrono::duration_cast<std::chrono::seconds>(end - start);
     std::cout << "Time taken: " << duration.count() << " seconds." << std::endl;
 
-    return 0;
-  } else if (buildType == BuildType::L1) {
-    std::cout << "Generating L1 trigger information..." << std::endl;
-    auto l1EventBuilder = std::make_unique<DELILA::L1EventBuilder>();
-    l1EventBuilder->LoadChSettings(chSettingsFileName);
-    l1EventBuilder->LoadFileList(fileList);
-    l1EventBuilder->LoadTimeSettings(DELILA::kTimeSettingsFileName);
-    l1EventBuilder->SetRefMod(refMod);
-    l1EventBuilder->SetRefCh(refCh);
-    l1EventBuilder->SetTimeWindow(timeWindow);
-    l1EventBuilder->SetCoincidenceWindow(coincidenceWindow);
-    l1EventBuilder->BuildEvent(nThread);
-    std::cout << "L1 trigger event file generated." << std::endl;
-  } else if (buildType == BuildType::L2) {
-    std::cout << "Generating L2 trigger information..." << std::endl;
-    auto l2EventBuilder = std::make_unique<DELILA::L2EventBuilder>();
-    l2EventBuilder->LoadChSettings(chSettingsFileName);
-    l2EventBuilder->SetCoincidenceWindow(coincidenceWindow);
-    l2EventBuilder->LoadL2Settings(l2SettingsFileName);
-    l2EventBuilder->BuildEvent(nThread);
-    std::cout << "L2 trigger event file generated." << std::endl;
+  } catch (const DELILA::FileException &e) {
+    std::cerr << "\n❌ File Error: " << e.what() << std::endl;
+    return 1;
+  } catch (const DELILA::ConfigException &e) {
+    std::cerr << "\n❌ Configuration Error: " << e.what() << std::endl;
+    return 1;
+  } catch (const DELILA::JSONException &e) {
+    std::cerr << "\n❌ JSON Parse Error: " << e.what() << std::endl;
+    return 1;
+  } catch (const DELILA::ValidationException &e) {
+    std::cerr << "\n❌ Validation Error: " << e.what() << std::endl;
+    return 1;
+  } catch (const DELILA::RangeException &e) {
+    std::cerr << "\n❌ Range Error: " << e.what() << std::endl;
+    return 1;
+  } catch (const DELILA::DELILAException &e) {
+    std::cerr << "\n❌ DELILA Error: " << e.what() << std::endl;
+    return 1;
+  } catch (const std::exception &e) {
+    std::cerr << "\n❌ Unexpected Error: " << e.what() << std::endl;
+    return 1;
+  } catch (...) {
+    std::cerr << "\n❌ Unknown error occurred" << std::endl;
+    return 1;
   }
-
-  auto end = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::seconds>(end - start);
-  std::cout << "Time taken: " << duration.count() << " seconds." << std::endl;
 
   return 0;
 }

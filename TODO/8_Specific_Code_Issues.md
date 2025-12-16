@@ -183,3 +183,12 @@
 - [ ] Add bounds checking to all array/vector access
 - [ ] Replace Form() with modern string formatting
 - [ ] Add validation unit tests
+
+### ⚠️ KISS Principle Reminder
+
+When fixing specific code issues:
+- **Don't build frameworks**: A logging framework might be overkill - maybe just a few helper functions
+- **Naming consistency matters more than perfection**: Pick a convention and stick to it
+- **Configuration can be too flexible**: Hard-coded paths are sometimes okay if they work
+- **Validation where it matters**: Validate user input, not every internal function parameter
+- **Duplicate code isn't always bad**: 2 similar functions might be simpler than 1 complex one

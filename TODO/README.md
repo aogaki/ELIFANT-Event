@@ -11,8 +11,8 @@ This directory contains detailed improvement recommendations for the ELIFANT-Eve
 ## Files by Priority
 
 ### HIGH Priority
-1. ✅ [Memory Management Issues](COMPLETED_1_Memory_Management_Issues.md) - **COMPLETED** - Fixed memory leaks and unsafe pointer usage
-2. [Error Handling and Exception Safety](2_Error_Handling_and_Exception_Safety.md) - Implement proper error handling
+1. ✅ [Memory Management Issues](1_Memory_Management_Issues.md) - **COMPLETED** - Fixed memory leaks and unsafe pointer usage
+2. ✅ [Error Handling and Exception Safety](2_Error_Handling_and_Exception_Safety.md) - **COMPLETED** - Comprehensive exception handling integrated
 3. [Thread Safety Issues](3_Thread_Safety_Issues.md) - Fix race conditions and synchronization problems
 
 ### MEDIUM Priority
@@ -34,11 +34,18 @@ This directory contains detailed improvement recommendations for the ELIFANT-Eve
   - Created 26 unit tests, all passing
   - Maintained ROOT compatibility
 
+- ✅ **TODO #2 - Error Handling and Exception Safety** (Completed)
+  - Created comprehensive exception hierarchy (DELILAExceptions.hpp)
+  - Integrated exception handling in L1EventBuilder, L2EventBuilder, and TimeAlignment
+  - Added try-catch blocks in main.cpp with user-friendly error messages
+  - Validated inputs for thread counts, file lists, and configuration
+  - All existing bounds checking maintained
+
 ### In Progress
 - None currently
 
 ### Remaining
-- 8 TODOs (2 HIGH, 4 MEDIUM, 2 LOW priority)
+- 7 TODOs (1 HIGH, 4 MEDIUM, 2 LOW priority)
 
 ## Getting Started
 
@@ -58,3 +65,17 @@ This directory contains detailed improvement recommendations for the ELIFANT-Eve
 - Some solutions require C++17 or C++20 features
 - ROOT-specific considerations are noted where applicable
 - Performance improvements should be measured before and after implementation
+
+## ⚠️ IMPORTANT: KISS Principle
+
+**Keep It Simple, Stupid** - This principle must be respected throughout all improvements:
+
+- **Don't over-engineer**: Implement the simplest solution that solves the problem
+- **Avoid premature optimization**: Profile first, then optimize what matters
+- **No unnecessary abstractions**: Don't create complex class hierarchies unless truly needed
+- **Readable over clever**: Write code that's easy to understand, not code that shows off
+- **Incremental improvements**: Small, focused changes are better than large refactorings
+- **Question every feature**: If you're not sure you need it, you probably don't
+- **Maintainability first**: Future maintainers (including yourself) will thank you
+
+Remember: The best code is code that works correctly and is easy to understand and modify.

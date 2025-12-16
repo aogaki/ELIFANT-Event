@@ -78,3 +78,12 @@ Created comprehensive test suite using TDD approach:
 - All memory leaks have been fixed by ensuring proper cleanup in error paths
 - Exception safety is provided through TFileRAII for new code
 - Existing code has been made safer with minimal changes to maintain compatibility
+
+### ⚠️ KISS Principle Applied
+
+This TODO followed KISS principles:
+- ✅ **Used existing patterns**: Worked with ROOT's ownership model instead of fighting it
+- ✅ **Minimal changes**: Fixed memory leaks without rewriting entire classes
+- ✅ **Simple solutions**: Added `delete` statements where needed, not complex RAII everywhere
+- ✅ **Maintained compatibility**: Kept raw pointers where ROOT requires them
+- ✅ **Incremental improvements**: Fixed specific issues without over-engineering

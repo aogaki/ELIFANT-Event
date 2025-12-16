@@ -6,6 +6,7 @@
 #include <TSpectrum.h>
 #include <TTree.h>
 
+#include <DELILAExceptions.hpp>
 #include <algorithm>
 #include <csignal>
 #include <iostream>
@@ -45,22 +46,26 @@ DELILA::TimeAlignment::~TimeAlignment()
 
 void DELILA::TimeAlignment::LoadChSettings(const std::string &fileName)
 {
-  fChSettingsVec = ChSettings::GetChSettings(fileName);
-  if (fChSettingsVec.size() == 0) {
-    std::cerr << "Error: No channel settings found in file: " << fileName
-              << std::endl;
-    return;
+  try {
+    fChSettingsVec = ChSettings::GetChSettings(fileName);
+    if (fChSettingsVec.empty()) {
+      throw DELILA::ConfigException("No channel settings found in file: " + fileName);
+    }
+  } catch (const DELILA::ConfigException &e) {
+    throw;  // Re-throw DELILA exceptions as-is
+  } catch (const std::exception &e) {
+    throw DELILA::ConfigException("Failed to load channel settings from " + fileName +
+                                  ": " + e.what());
   }
 }
 
 void DELILA::TimeAlignment::LoadFileList(
     const std::vector<std::string> &fileList)
 {
-  fFileList = fileList;
-  if (fFileList.size() == 0) {
-    std::cerr << "Error: No files found." << std::endl;
-    return;
+  if (fileList.empty()) {
+    throw DELILA::ValidationException("File list is empty");
   }
+  fFileList = fileList;
 }
 
 void DELILA::TimeAlignment::InitHistograms()

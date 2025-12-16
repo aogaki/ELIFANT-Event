@@ -213,3 +213,13 @@
 - [ ] Create user guide with examples
 - [ ] Add performance benchmarks
 - [ ] Document threading model and safety guarantees
+
+### ⚠️ KISS Principle Reminder
+
+When adding tests and documentation:
+- **Test what matters**: Don't aim for 100% coverage - test the critical paths
+- **Simple tests are better**: A clear, simple test is more valuable than a complex one
+- **Documentation rots**: Keep docs minimal and close to code - comments over separate docs
+- **README first**: A good README is worth more than extensive Doxygen comments
+- **Don't over-test**: Testing getters/setters wastes time - test actual logic
+- **Examples over explanations**: Show how to use it, don't just describe it

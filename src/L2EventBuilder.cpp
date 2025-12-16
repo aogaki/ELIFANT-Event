@@ -5,6 +5,7 @@
 #include <TROOT.h>
 #include <TTree.h>
 
+#include <DELILAExceptions.hpp>
 #include <csignal>
 #include <filesystem>
 
@@ -26,30 +27,38 @@ DELILA::L2EventBuilder::~L2EventBuilder() {}
 
 void DELILA::L2EventBuilder::LoadChSettings(const std::string &fileName)
 {
-  fChSettingsVec = ChSettings::GetChSettings(fileName);
-  if (fChSettingsVec.size() == 0) {
-    std::cerr << "Error: No channel settings found in file: " << fileName
-              << std::endl;
-    return;
+  try {
+    fChSettingsVec = ChSettings::GetChSettings(fileName);
+    if (fChSettingsVec.empty()) {
+      throw DELILA::ConfigException("No channel settings found in file: " + fileName);
+    }
+  } catch (const DELILA::ConfigException &e) {
+    throw;  // Re-throw DELILA exceptions as-is
+  } catch (const std::exception &e) {
+    throw DELILA::ConfigException("Failed to load channel settings from " + fileName +
+                                  ": " + e.what());
   }
 }
 
 void DELILA::L2EventBuilder::LoadL2Settings(const std::string &fileName)
 {
-  if (fChSettingsVec.size() == 0) {
-    std::cerr << "Error: No channel settings found in file: " << fileName
-              << std::endl;
-    return;
+  if (fChSettingsVec.empty()) {
+    throw DELILA::ConfigException(
+        "Channel settings must be loaded before L2 settings. Call LoadChSettings first.");
   }
 
   std::ifstream file(fileName);
   if (!file.is_open()) {
-    std::cerr << "Error: Could not open L2 settings file: " << fileName
-              << std::endl;
-    return;
+    throw DELILA::FileException("Could not open L2 settings file: " + fileName);
   }
+
   nlohmann::json j;
-  file >> j;
+  try {
+    file >> j;
+  } catch (const nlohmann::json::exception &e) {
+    throw DELILA::JSONException("Invalid JSON in L2 settings file " + fileName +
+                                ": " + e.what());
+  }
   file.close();
 
   fCounterVec.clear();
@@ -315,6 +324,11 @@ void DELILA::L2EventBuilder::ProcessData(
     for (auto &counter : localCounterVec) {
       counter.ResetCounter();
       for (auto &rawData : *eventData.eventDataVec) {
+        // Bounds checking to prevent segmentation fault
+        if (rawData.mod >= fChSettingsVec.size() ||
+            rawData.ch >= fChSettingsVec[rawData.mod].size()) {
+          continue;
+        }
         counter.Check(rawData.mod, rawData.ch);
       }
     }

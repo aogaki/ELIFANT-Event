@@ -175,3 +175,13 @@
 - [ ] Consider using std::optional for nullable returns
 - [ ] Implement strong types for type safety
 - [ ] Use constexpr for compile-time constants
+
+### ⚠️ KISS Principle Reminder
+
+When modernizing C++ code:
+- **Modern doesn't mean complex**: `using` is simpler than `typedef`, but don't add complexity
+- **[[nodiscard]] sparingly**: Only add it where ignoring the return is truly a bug
+- **Don't overuse features**: Not every function needs `constexpr`, not every type needs to be strong-typed
+- **Readable first**: `auto` can make code shorter but also harder to understand
+- **Progressive updates**: Convert to modern C++ incrementally during normal maintenance
+- **Keep it working**: Don't change working code just to make it "more modern"

@@ -160,3 +160,13 @@ ELIFANT-Event/
 - [ ] Move implementation to source files
 - [ ] Reorganize directory structure
 - [ ] Add unit tests for each component
+
+### ⚠️ KISS Principle Reminder
+
+When refactoring architecture:
+- **Don't create interfaces prematurely**: Only extract interfaces when you have multiple implementations
+- **Avoid over-layering**: 3 layers (UI/Business/Data) is usually enough - don't create 10
+- **Question every abstraction**: Each layer adds complexity - make sure it's worth it
+- **Refactor incrementally**: Big rewrites usually fail - make small improvements over time
+- **Solve real problems**: Don't refactor "just because" - fix actual pain points
+- **Keep it working**: The code works now - don't break it while making it "better"
