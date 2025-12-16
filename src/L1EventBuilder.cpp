@@ -6,9 +6,23 @@
 
 #include <EventData.hpp>
 #include <algorithm>
+#include <csignal>
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
+
+// Global pointer for signal handler access
+static DELILA::L1EventBuilder* g_eventBuilder = nullptr;
+
+// Signal handler for Ctrl-C
+void signalHandler(int signal) {
+  if (signal == SIGINT) {
+    std::cout << "\n\nReceived Ctrl-C! Stopping threads gracefully..." << std::endl;
+    if (g_eventBuilder != nullptr) {
+      g_eventBuilder->Cancel();
+    }
+  }
+}
 
 DELILA::L1EventBuilder::L1EventBuilder() {}
 DELILA::L1EventBuilder::~L1EventBuilder() {}
@@ -90,6 +104,11 @@ void DELILA::L1EventBuilder::BuildEvent(const uint32_t nThreads)
   ROOT::DisableImplicitMT();
   ROOT::EnableThreadSafety();
 
+  // Setup signal handler for Ctrl-C
+  g_eventBuilder = this;
+  fCancelled.store(false);
+  ::signal(SIGINT, signalHandler);
+
   // Validate reference channel configuration
   if (fTimeSettingsVec.empty()) {
     std::cerr << "Error: Time settings not loaded!" << std::endl;
@@ -156,6 +175,13 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
   outputTree->SetDirectory(outputFile);
 
   for (auto iFile = 0; iFile < fileList.size(); iFile++) {
+    // Check if cancelled
+    if (fCancelled.load()) {
+      std::lock_guard<std::mutex> lock(fFileListMutex);
+      std::cout << "Thread " << threadID << " cancelled by user." << std::endl;
+      break;
+    }
+
     std::string fileName = fileList[iFile];
     {
       std::lock_guard<std::mutex> lock(fFileListMutex);

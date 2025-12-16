@@ -7,6 +7,8 @@
 #include <TTree.h>
 
 #include <algorithm>
+#include <csignal>
+#include <iostream>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <thread>
@@ -14,6 +16,19 @@
 
 // Define USE_MUTEX_APPROACH to compare performance
 // #define USE_MUTEX_APPROACH
+
+// Global pointer for signal handler access
+static DELILA::TimeAlignment* g_timeAlignment = nullptr;
+
+// Signal handler for Ctrl-C
+void timeAlignmentSignalHandler(int signal) {
+  if (signal == SIGINT) {
+    std::cout << "\n\nReceived Ctrl-C! Stopping time alignment threads gracefully..." << std::endl;
+    if (g_timeAlignment != nullptr) {
+      g_timeAlignment->Cancel();
+    }
+  }
+}
 
 DELILA::TimeAlignment::TimeAlignment()
 {
@@ -131,6 +146,11 @@ void DELILA::TimeAlignment::FillHistograms(const int nThreads)
   ROOT::DisableImplicitMT();
   ROOT::EnableThreadSafety();
 
+  // Setup signal handler for Ctrl-C
+  g_timeAlignment = this;
+  fCancelled.store(false);
+  ::signal(SIGINT, timeAlignmentSignalHandler);
+
   // Initialize thread-local histograms
   auto maxID = 0;
   for (size_t i = 0; i < fChSettingsVec.size(); i++) {
@@ -186,6 +206,13 @@ void DELILA::TimeAlignment::FillHistograms(const int nThreads)
 void DELILA::TimeAlignment::DataProcess(int threadID)
 {
   while (fDataProcessFlag) {
+    // Check if cancelled
+    if (fCancelled.load()) {
+      std::lock_guard<std::mutex> lock(fFileListMutex);
+      std::cout << "Thread " << threadID << " cancelled by user." << std::endl;
+      break;
+    }
+
     auto fileName = std::string();
     {
       std::lock_guard<std::mutex> lock(fFileListMutex);
@@ -224,6 +251,15 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
     std::vector<std::tuple<UChar_t, UChar_t, Double_t>> dataVec;
     dataVec.reserve(nEvents);
     for (int64_t iEve = 0; iEve < nEvents; iEve++) {
+      // Check if cancelled periodically (every 10000 events)
+      if (iEve % 10000 == 0 && fCancelled.load()) {
+        std::lock_guard<std::mutex> lock(fFileListMutex);
+        std::cout << "Thread " << threadID << " cancelled by user after processing "
+                  << iEve << "/" << nEvents << " events." << std::endl;
+        file->Close();
+        delete file;
+        return;
+      }
       tree->GetEntry(iEve);
 
       // Bounds checking to prevent segmentation fault

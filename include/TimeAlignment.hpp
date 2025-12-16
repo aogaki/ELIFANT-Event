@@ -5,6 +5,7 @@
 #include <TH1.h>
 #include <TH2.h>
 
+#include <atomic>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -29,6 +30,7 @@ class TimeAlignment
   void InitHistograms();
   void FillHistograms(const int nThreads);
   void CalculateTimeAlignment();
+  void Cancel() { fCancelled.store(true); }
 
  private:
   std::vector<std::vector<ChSettings_t>> fChSettingsVec;
@@ -38,6 +40,7 @@ class TimeAlignment
 
   bool fDataProcessFlag = false;
   std::vector<std::string> fFileList;
+  std::atomic<bool> fCancelled{false};
   std::mutex fFileListMutex;
   std::mutex fHistogramMutex;  // For mutex-based approach
 

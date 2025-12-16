@@ -5,7 +5,21 @@
 #include <TROOT.h>
 #include <TTree.h>
 
+#include <csignal>
 #include <filesystem>
+
+// Global pointer for signal handler access
+static DELILA::L2EventBuilder* g_l2EventBuilder = nullptr;
+
+// Signal handler for Ctrl-C
+void l2SignalHandler(int signal) {
+  if (signal == SIGINT) {
+    std::cout << "\n\nReceived Ctrl-C! Stopping L2 threads gracefully..." << std::endl;
+    if (g_l2EventBuilder != nullptr) {
+      g_l2EventBuilder->Cancel();
+    }
+  }
+}
 
 DELILA::L2EventBuilder::L2EventBuilder() {}
 DELILA::L2EventBuilder::~L2EventBuilder() {}
@@ -118,6 +132,11 @@ void DELILA::L2EventBuilder::BuildEvent(uint32_t nThreads)
   // Disable implicit multi-threading is faster now. ROOT 6.34.08
   ROOT::DisableImplicitMT();
   ROOT::EnableThreadSafety();
+
+  // Setup signal handler for Ctrl-C
+  g_l2EventBuilder = this;
+  fCancelled.store(false);
+  ::signal(SIGINT, l2SignalHandler);
 
   GetFileList("L1");
 
@@ -261,6 +280,14 @@ void DELILA::L2EventBuilder::ProcessData(
   auto lastTime = startTime;
   const auto nEntries = inputTree->GetEntries();
   for (Long64_t iEve = 0; iEve < nEntries; iEve++) {
+    // Check if cancelled
+    if (fCancelled.load()) {
+      std::lock_guard<std::mutex> lock(fMutex);
+      std::cout << "Thread " << threadID << " cancelled by user after processing "
+                << iEve << "/" << nEntries << " events." << std::endl;
+      break;
+    }
+
     inputTree->GetEntry(iEve);
     if ((threadID == 0) && (iEve % 1000 == 0)) {
       auto now = std::chrono::high_resolution_clock::now();

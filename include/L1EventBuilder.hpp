@@ -3,6 +3,7 @@
 
 #include <TTree.h>
 
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <memory>
@@ -36,6 +37,7 @@ class L1EventBuilder
   void SetRefCh(uint8_t ch) { fRefCh = ch; }
 
   void BuildEvent(const uint32_t nThreads);
+  void Cancel() { fCancelled.store(true); }
 
  private:
   std::vector<std::vector<ChSettings_t>> fChSettingsVec;
@@ -46,6 +48,7 @@ class L1EventBuilder
   uint8_t fRefCh = 0;
   std::vector<std::string> fFileList;
   std::mutex fFileListMutex;
+  std::atomic<bool> fCancelled{false};
 
   void DataReader(int threadID, std::vector<std::string> fileList);
 };
