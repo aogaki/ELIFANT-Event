@@ -39,7 +39,7 @@ class L2EventBuilder
 
   std::vector<std::string> fFileList;
   std::atomic<bool> fCancelled{false};
-  void GetFileList(std::string key);
+  void GetFileList(const std::string &key);
   void ProcessData(const uint32_t threadID, const std::string &fileName,
                    std::vector<L2Counter> localCounterVec,
                    std::vector<L2Flag> localFlagVec,

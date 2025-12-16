@@ -2,6 +2,7 @@
 
 #include <TChain.h>
 #include <TFile.h>
+#include <TFileRAII.hpp>
 #include <TROOT.h>
 #include <TTree.h>
 
@@ -199,13 +200,13 @@ void DELILA::L2EventBuilder::MergeFiles()
   chain->SetBranchAddress("TriggerTime", &eventData.triggerTime);
   chain->SetBranchAddress("EventDataVec", &eventData.eventDataVec);
 
-  auto outputFile = new TFile("L2Event.root", "RECREATE");
+  auto outputFile = DELILA::MakeTFile("L2Event.root", "RECREATE");
   auto outputTree = new TTree("L2EventData", "L2EventData");
 
   //   DELILA::EventData eventData;
   outputTree->Branch("TriggerTime", &eventData.triggerTime, "TriggerTime/D");
   outputTree->Branch("EventDataVec", &eventData.eventDataVec);
-  outputTree->SetDirectory(outputFile);
+  outputTree->SetDirectory(outputFile.get());
 
   auto startTime = std::chrono::high_resolution_clock::now();
   auto lastTime = startTime;
@@ -242,7 +243,7 @@ void DELILA::L2EventBuilder::MergeFiles()
 
   outputFile->cd();
   outputTree->Write();
-  outputFile->Close();
+  // outputFile will be automatically closed and deleted
 }
 
 void DELILA::L2EventBuilder::ProcessData(
@@ -257,12 +258,12 @@ void DELILA::L2EventBuilder::ProcessData(
               << std::endl;
   }
 
-  auto inputFile = new TFile(fileName.c_str(), "READ");
+  auto inputFile = DELILA::MakeTFile(fileName.c_str(), "READ");
   auto inputTree = static_cast<TTree *>(inputFile->Get("L1EventData"));
   if (!inputTree) {
     std::cerr << "Error: Could not find tree in file: " << fileName
               << std::endl;
-    inputFile->Close();
+    // inputFile will be automatically closed and deleted
     return;
   }
   DELILA::EventData eventData;
@@ -270,9 +271,9 @@ void DELILA::L2EventBuilder::ProcessData(
   inputTree->SetBranchAddress("EventDataVec", &eventData.eventDataVec);
 
   auto outputName = Form("L2_%d.root", threadID);
-  auto outputFile = new TFile(outputName, "RECREATE");
+  auto outputFile = DELILA::MakeTFile(outputName, "RECREATE");
   auto outputTree = new TTree("L2EventData", "L2EventData");
-  outputTree->SetDirectory(outputFile);
+  outputTree->SetDirectory(outputFile.get());
 
   for (auto &flag : localFlagVec) {
     outputTree->Branch(flag.name.c_str(), &flag.flag,
@@ -358,9 +359,7 @@ void DELILA::L2EventBuilder::ProcessData(
 
   outputFile->cd();
   outputTree->Write();
-  outputFile->Close();
-
-  inputFile->Close();
+  // outputFile and inputFile will be automatically closed and deleted
 
   {
     std::lock_guard<std::mutex> lock(fMutex);
@@ -369,7 +368,7 @@ void DELILA::L2EventBuilder::ProcessData(
   }
 }
 
-void DELILA::L2EventBuilder::GetFileList(std::string key)
+void DELILA::L2EventBuilder::GetFileList(const std::string &key)
 {
   std::string directory = "./";
 

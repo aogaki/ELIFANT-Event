@@ -2,6 +2,7 @@
 
 #include <TF1.h>
 #include <TFile.h>
+#include <TFileRAII.hpp>
 #include <TROOT.h>
 #include <TSpectrum.h>
 #include <TTree.h>
@@ -38,7 +39,7 @@ DELILA::TimeAlignment::TimeAlignment()
 DELILA::TimeAlignment::~TimeAlignment()
 {
   // Destructor
-  fDataProcessFlag = false;
+  fDataProcessFlag.store(false);
   fFileList.clear();
   fChSettingsVec.clear();
   fHistoTime.clear();
@@ -101,7 +102,7 @@ void DELILA::TimeAlignment::InitHistograms()
 
 void DELILA::TimeAlignment::SaveHistograms()
 {
-  auto file = new TFile(kTimeAlignmentFileName.c_str(), "RECREATE");
+  auto file = DELILA::MakeTFile(kTimeAlignmentFileName.c_str(), "RECREATE");
   if (!file || file->IsZombie()) {
     std::cerr << "Error: Could not open file: " << kTimeAlignmentFileName
               << std::endl;
@@ -139,8 +140,7 @@ void DELILA::TimeAlignment::SaveHistograms()
     }
   }
 
-  file->Close();
-  delete file;
+  // file->Close() and delete will be called automatically by TFilePtr destructor
   std::cout << "Histograms saved to: " << kTimeAlignmentFileName << std::endl;
 }
 
@@ -191,7 +191,7 @@ void DELILA::TimeAlignment::FillHistograms(const int nThreads)
 #endif
 
   std::vector<std::thread> threads;
-  fDataProcessFlag = true;
+  fDataProcessFlag.store(true);
   for (int i = 0; i < nThreads; ++i) {
     threads.emplace_back(&DELILA::TimeAlignment::DataProcess, this, i);
   }
@@ -210,7 +210,7 @@ void DELILA::TimeAlignment::FillHistograms(const int nThreads)
 
 void DELILA::TimeAlignment::DataProcess(int threadID)
 {
-  while (fDataProcessFlag) {
+  while (fDataProcessFlag.load()) {
     // Check if cancelled
     if (fCancelled.load()) {
       std::lock_guard<std::mutex> lock(fFileListMutex);
@@ -222,17 +222,17 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
     {
       std::lock_guard<std::mutex> lock(fFileListMutex);
       if (fFileList.empty()) {
-        fDataProcessFlag = false;
+        fDataProcessFlag.store(false);
         break;
       }
       fileName = fFileList.front();
       fFileList.erase(fFileList.begin());
       std::cout << "Processing file: " << fileName << std::endl;
     }
-    auto file = new TFile(fileName.c_str(), "READ");
+    auto file = DELILA::MakeTFile(fileName.c_str(), "READ");
     if (!file || file->IsZombie()) {
       std::cerr << "Error: Could not open file: " << fileName << std::endl;
-      continue;
+      continue;  // Now safe - file will be automatically closed and deleted
     }
     auto tree = static_cast<TTree *>(file->Get("ELIADE_Tree"));
     tree->SetBranchStatus("*", kFALSE);
@@ -261,9 +261,7 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
         std::lock_guard<std::mutex> lock(fFileListMutex);
         std::cout << "Thread " << threadID << " cancelled by user after processing "
                   << iEve << "/" << nEvents << " events." << std::endl;
-        file->Close();
-        delete file;
-        return;
+        return;  // file will be automatically closed and deleted
       }
       tree->GetEntry(iEve);
 
@@ -285,8 +283,7 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
         dataVec.emplace_back(mod, ch, fineTS / 1000.);  // ps -> ns
       }
     }
-    file->Close();
-    delete file;
+    // file will be automatically closed and deleted at end of scope
 
     std::sort(dataVec.begin(), dataVec.end(), [](const auto &a, const auto &b) {
       return std::get<2>(a) < std::get<2>(b);
@@ -396,7 +393,7 @@ void DELILA::TimeAlignment::MergeThreadHistograms()
 void DELILA::TimeAlignment::CalculateTimeAlignment()
 {
   TString fileName = kTimeAlignmentFileName;
-  auto file = new TFile(fileName, "READ");
+  auto file = DELILA::MakeTFile(fileName, "READ");
   if (!file || file->IsZombie()) {
     std::cerr << "Error: Could not open file: " << fileName << std::endl;
     return;
@@ -460,8 +457,7 @@ void DELILA::TimeAlignment::CalculateTimeAlignment()
       }
     }
   }
-  file->Close();
-  delete file;
+  // file will be automatically closed and deleted
 
   nlohmann::json jsonData = nlohmann::json::array();
   for (auto iRefMod = 0; iRefMod < fChSettingsVec.size(); iRefMod++) {

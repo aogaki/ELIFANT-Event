@@ -38,7 +38,7 @@ class TimeAlignment
   std::vector<std::vector<std::unique_ptr<TH1D>>> fHistoADC;
   double_t fTimeWindow = 0.;
 
-  bool fDataProcessFlag = false;
+  std::atomic<bool> fDataProcessFlag{false};
   std::vector<std::string> fFileList;
   std::atomic<bool> fCancelled{false};
   std::mutex fFileListMutex;

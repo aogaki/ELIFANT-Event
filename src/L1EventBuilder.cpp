@@ -1,6 +1,7 @@
 #include "L1EventBuilder.hpp"
 
 #include <TFile.h>
+#include <TFileRAII.hpp>
 #include <TROOT.h>
 #include <TTree.h>
 
@@ -187,12 +188,12 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
                                         std::vector<std::string> fileList)
 {
   TString outputName = TString::Format("L1_%d.root", threadID);
-  auto outputFile = new TFile(outputName, "RECREATE");
+  auto outputFile = DELILA::MakeTFile(outputName, "RECREATE");
   auto outputTree = new TTree("L1EventData", "L1EventData");
   DELILA::EventData eventData;
   outputTree->Branch("TriggerTime", &eventData.triggerTime, "TriggerTime/D");
   outputTree->Branch("EventDataVec", &eventData.eventDataVec);
-  outputTree->SetDirectory(outputFile);
+  outputTree->SetDirectory(outputFile.get());
 
   for (auto iFile = 0; iFile < fileList.size(); iFile++) {
     // Check if cancelled
@@ -210,7 +211,7 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
                 << std::endl;
     }
 
-    auto file = new TFile(fileName.c_str(), "READ");
+    auto file = DELILA::MakeTFile(fileName.c_str(), "READ");
     if (!file || file->IsZombie()) {
       std::cerr << "Error: Could not open file: " << fileName << std::endl;
       continue;
@@ -269,7 +270,7 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
         rawDataVec.emplace_back(rawData);
       }
     }
-    file->Close();
+    // file will be automatically closed and deleted
     std::sort(rawDataVec.begin(), rawDataVec.end(),
               [](const std::unique_ptr<RawData_t> &a,
                  const std::unique_ptr<RawData_t> &b) {
@@ -376,8 +377,7 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
 
   outputFile->cd();
   outputTree->Write();
-  outputFile->Close();
-  delete outputFile;
+  // outputFile will be automatically closed and deleted
   {
     std::lock_guard<std::mutex> lock(fFileListMutex);
     std::cout << "Thread " << threadID << " finished writing data."
