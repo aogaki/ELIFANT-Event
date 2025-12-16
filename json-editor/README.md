@@ -5,6 +5,7 @@ A simple React + Material-UI web application for visually editing two-dimensiona
 ## Features
 - Load any chSettings.json file (2D array: [module][channel])
 - Select a module and view/edit all its channels in a spreadsheet-like table
+- **Apply common values to all channels** - Set a property value once and apply it to all channels in a module
 - Edit values directly in the table (supports numbers, strings, and JSON objects)
 - Sticky key column for easy navigation
 - Material Design UI for a modern look
@@ -29,7 +30,11 @@ The app will open in your browser (usually at http://localhost:3000).
 - Click the file input to load your `chSettings.json` file.
 - When the file dialog opens, navigate to your project root directory (e.g., ELIFANT-Event) and select the desired `chSettings.json` file from there (such as `all_run_p91Zr/chSettings.json`, `build/chSettings.json`, `E9/chSettings.json`, or `JSON/chSettings.json`).
 - Use the module selector to choose a module.
-- Edit channel values directly in the table.
+- **Apply common values (NEW):**
+  - In the blue "Apply Common Value" section, select a property from the dropdown
+  - Enter the desired value (the input type adapts to the property type)
+  - Click "Apply to All Channels" to set that value for all channels in the module
+- Edit individual channel values directly in the table below.
 - Click "Save JSON" to download the updated file.
 
 > **Note:** For security reasons, browsers do not allow web applications to set the default open directory for file dialogs. Please manually navigate to your project root directory when opening files.

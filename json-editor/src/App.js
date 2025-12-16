@@ -28,6 +28,10 @@ function App() {
   // State for selected module
   const [selectedModule, setSelectedModule] = useState(0);
 
+  // State for common properties editor
+  const [commonKey, setCommonKey] = useState("");
+  const [commonValue, setCommonValue] = useState("");
+
   // Define property types for chSettings.json
   const propertyTypes = {
     ACChannel: 'integer',
@@ -175,6 +179,50 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
+  // Apply common value to all channels in the selected module
+  const handleApplyCommonValue = () => {
+    if (!commonKey || commonKey.trim() === "") {
+      setError("Please select a property to modify");
+      return;
+    }
+
+    if (!Array.isArray(data) || !Array.isArray(data[selectedModule])) {
+      setError("Invalid data structure");
+      return;
+    }
+
+    const expectedType = propertyTypes[commonKey];
+    let processedValue = commonValue;
+
+    // Convert value based on expected type
+    if (expectedType === 'array') {
+      try {
+        processedValue = parseStringArray(commonValue);
+      } catch (e) {
+        setError(`Invalid array format: ${e.message}`);
+        return;
+      }
+    } else if (expectedType) {
+      processedValue = convertToType(commonValue, expectedType);
+    }
+
+    // Apply the value to all channels in the selected module
+    const newData = data.map((mod, mIdx) =>
+      mIdx === selectedModule
+        ? mod.map((ch) => {
+            if (typeof ch === 'object' && ch !== null) {
+              return { ...ch, [commonKey]: processedValue };
+            }
+            return ch;
+          })
+        : mod
+    );
+
+    setData(newData);
+    setError("");
+    setCommonValue(""); // Clear after applying
+  };
+
   // Render object as table
   const renderObjectTable = (obj) => (
     <table border="1" cellPadding="5">
@@ -262,6 +310,94 @@ function App() {
       default:
         return 'text';
     }
+  };
+
+  // Render common properties editor
+  const renderCommonPropertiesEditor = (arr) => {
+    if (!Array.isArray(arr) || arr.length === 0) return null;
+    const module = arr[selectedModule];
+    if (!Array.isArray(module) || module.length === 0) return null;
+
+    // Get all available keys from the channels
+    const allKeys = Array.from(new Set(module.flatMap(ch => typeof ch === 'object' && ch !== null ? Object.keys(ch) : [])));
+
+    return (
+      <Box sx={{ margin: '10px 0', padding: 2, border: '2px solid #1976d2', background: '#e3f2fd', borderRadius: 2 }}>
+        <Typography variant="h6" gutterBottom color="primary">
+          Apply Common Value to All Channels in Module {selectedModule}
+        </Typography>
+        <Typography variant="body2" color="text.secondary" gutterBottom>
+          Set a property value that will be applied to all {module.length} channels in this module
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', mt: 2 }}>
+          <FormControl sx={{ minWidth: 200 }} size="small">
+            <InputLabel id="common-key-label">Property</InputLabel>
+            <Select
+              labelId="common-key-label"
+              value={commonKey}
+              label="Property"
+              onChange={e => {
+                setCommonKey(e.target.value);
+                setCommonValue(""); // Clear value when key changes
+              }}
+            >
+              {allKeys.sort().map((key) => (
+                <MenuItem key={key} value={key}>
+                  {key} ({propertyTypes[key] || 'unknown'})
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          {commonKey && (
+            propertyTypes[commonKey] === 'boolean' ? (
+              <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(commonValue)}
+                  onChange={e => setCommonValue(e.target.checked)}
+                  style={{ transform: 'scale(1.5)', marginRight: '8px' }}
+                />
+                <Typography variant="body2">
+                  {commonValue ? 'true' : 'false'}
+                </Typography>
+              </Box>
+            ) : propertyTypes[commonKey] === 'array' ? (
+              <ArrayInput
+                value={commonValue ? (Array.isArray(commonValue) ? commonValue : []) : []}
+                onChange={(arrayValue) => setCommonValue(arrayValue)}
+                placeholder="Enter comma-separated values"
+                style={{ width: '300px' }}
+              />
+            ) : (
+              <TextField
+                size="small"
+                label="Value"
+                type={getInputType(propertyTypes[commonKey])}
+                value={commonValue}
+                onChange={e => setCommonValue(e.target.value)}
+                placeholder={`Enter ${propertyTypes[commonKey] || 'value'}`}
+                inputProps={{
+                  step: propertyTypes[commonKey] === 'float' ? 'any' : undefined,
+                  min: propertyTypes[commonKey] === 'integer' ? 0 : undefined
+                }}
+                sx={{ width: 300 }}
+              />
+            )
+          )}
+
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={handleApplyCommonValue}
+            disabled={!commonKey}
+            sx={{ height: 40 }}
+          >
+            Apply to All Channels
+          </Button>
+        </Box>
+      </Box>
+    );
   };
 
   // Render all channels in a selected module (editable, horizontal, Material UI)
@@ -394,6 +530,7 @@ function App() {
                   </Select>
                 </FormControl>
               </Box>
+              {renderCommonPropertiesEditor(data)}
               {renderAllChannelsInModule(data)}
             </>
           )}
