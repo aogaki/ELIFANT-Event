@@ -35,7 +35,6 @@ build_test
 .vscode
 .DS_Store
 E9
-test
 run*
 all_run*
 compile_commands.json

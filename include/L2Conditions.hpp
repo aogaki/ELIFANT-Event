@@ -131,13 +131,14 @@ class L2DataAcceptance
         std::cerr << "Error: No monitors found in flag vector." << std::endl;
         return false;
       }
+      return false;  // All flags checked, none were true
     } else {
       std::cerr << "Error: Unknown logical operator: " << fLogicalOperator
                 << std::endl;
       return false;
     }
 
-    return true;
+    return true;  // AND logic: all checks passed
   };
 
  private:
