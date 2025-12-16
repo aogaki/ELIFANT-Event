@@ -71,6 +71,16 @@ void DELILA::L1EventBuilder::LoadTimeSettings(const std::string &fileName)
       }
     }
   }
+
+  // Print loaded dimensions for debugging
+  std::cout << "Time settings loaded: [" << fTimeSettingsVec.size() << "][";
+  if (!fTimeSettingsVec.empty()) {
+    std::cout << fTimeSettingsVec[0].size() << "][";
+    if (!fTimeSettingsVec[0].empty()) {
+      std::cout << fTimeSettingsVec[0][0].size() << "][...]";
+    }
+  }
+  std::cout << std::endl;
 }
 
 void DELILA::L1EventBuilder::BuildEvent(const uint32_t nThreads)
@@ -79,6 +89,35 @@ void DELILA::L1EventBuilder::BuildEvent(const uint32_t nThreads)
   // Disable implicit multi-threading is faster now. ROOT 6.34.08
   ROOT::DisableImplicitMT();
   ROOT::EnableThreadSafety();
+
+  // Validate reference channel configuration
+  if (fTimeSettingsVec.empty()) {
+    std::cerr << "Error: Time settings not loaded!" << std::endl;
+    return;
+  }
+  if (fRefMod >= fTimeSettingsVec.size()) {
+    std::cerr << "Error: TimeReferenceMod (" << static_cast<int>(fRefMod)
+              << ") is out of bounds! Time settings has "
+              << fTimeSettingsVec.size() << " modules." << std::endl;
+    std::cerr << "Please check your settings.json and timeSettings.json files."
+              << std::endl;
+    return;
+  }
+  if (fRefCh >= fTimeSettingsVec[fRefMod].size()) {
+    std::cerr << "Error: TimeReferenceCh (" << static_cast<int>(fRefCh)
+              << ") is out of bounds! Time settings for module " << static_cast<int>(fRefMod)
+              << " has " << fTimeSettingsVec[fRefMod].size() << " channels."
+              << std::endl;
+    std::cerr << "Please check your settings.json and timeSettings.json files."
+              << std::endl;
+    std::cerr << "Either regenerate timeSettings.json with './eve-builder -t'"
+              << std::endl;
+    std::cerr << "or set TimeReferenceCh to 0 in settings.json." << std::endl;
+    return;
+  }
+
+  std::cout << "Using reference: Module " << static_cast<int>(fRefMod)
+            << ", Channel " << static_cast<int>(fRefCh) << std::endl;
 
   // make local file list
   std::vector<std::vector<std::string>> localFileList;
