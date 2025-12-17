@@ -283,6 +283,10 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
     // CHUNKED PROCESSING: Process file in chunks to limit memory usage
     // Instead of loading all 174M entries (6.9 GB), process 10M at a time (350 MB)
 
+    // Performance profiling: measure read vs process time
+    Double_t totalReadTime = 0.0;
+    Double_t totalProcessTime = 0.0;
+
     for (Long64_t chunkStart = 0; chunkStart < nEntries; chunkStart += CHUNK_SIZE) {
       // Check if cancelled
       if (fCancelled.load()) {
@@ -294,6 +298,9 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
       // Calculate chunk boundaries with overlap for coincidence window
       Long64_t readStart = (chunkStart > OVERLAP_SIZE) ? (chunkStart - OVERLAP_SIZE) : 0;
       Long64_t readEnd = std::min(nEntries, chunkStart + CHUNK_SIZE + OVERLAP_SIZE);
+
+      // === Timing: Start Read Phase ===
+      auto readPhaseStart = std::chrono::high_resolution_clock::now();
 
       // Load this chunk from file
       std::vector<std::unique_ptr<RawData_t>> rawDataVec;
@@ -338,6 +345,10 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
                    const std::unique_ptr<RawData_t> &b) {
                   return a->fineTS < b->fineTS;
                 });
+
+      // === Timing: End Read Phase, Start Process Phase ===
+      auto readPhaseEnd = std::chrono::high_resolution_clock::now();
+      totalReadTime += std::chrono::duration<double>(readPhaseEnd - readPhaseStart).count();
 
     const auto nRawData = rawDataVec.size();
 
@@ -449,6 +460,10 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
       // Clear this chunk's data and release memory
       rawDataVec.clear();
       rawDataVec.shrink_to_fit();
+
+      // === Timing: End Process Phase ===
+      auto processPhaseEnd = std::chrono::high_resolution_clock::now();
+      totalProcessTime += std::chrono::duration<double>(processPhaseEnd - readPhaseEnd).count();
     }  // End chunk loop
     // Note: overlapBuffer is NOT cleared here to maintain cross-file continuity
 
@@ -461,6 +476,11 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
       std::lock_guard<std::mutex> lock(fFileListMutex);
       std::cout << "Thread " << threadID << ": Finished processing "
                 << fileName << std::endl;
+      std::cout << "         Read time:    " << totalReadTime << " s ("
+                << (totalReadTime / (totalReadTime + totalProcessTime) * 100) << "%)" << std::endl;
+      std::cout << "         Process time: " << totalProcessTime << " s ("
+                << (totalProcessTime / (totalReadTime + totalProcessTime) * 100) << "%)" << std::endl;
+      std::cout << "         Total time:   " << (totalReadTime + totalProcessTime) << " s" << std::endl;
     }
   }
 
