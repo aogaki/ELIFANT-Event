@@ -195,6 +195,15 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
   outputTree->Branch("EventDataVec", &eventData.eventDataVec);
   outputTree->SetDirectory(outputFile.get());
 
+  // Overlap buffer for cross-file continuity
+  // Maintains events from end of previous chunk/file for coincidence detection
+  std::vector<std::unique_ptr<RawData_t>> overlapBuffer;
+
+  // Track last timestamp to detect acquisition restarts (timestamp resets)
+  // If first event of new file has earlier timestamp than last event of previous file,
+  // it indicates a new acquisition and we should clear the overlap buffer
+  Double_t lastFileLastTimestamp = -1.0;
+
   for (auto iFile = 0; iFile < fileList.size(); iFile++) {
     // Check if cancelled
     if (fCancelled.load()) {
@@ -247,17 +256,32 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
 
     const auto nEntries = tree->GetEntries();
 
+    // Check first event timestamp to detect acquisition restart
+    if (nEntries > 0 && lastFileLastTimestamp > 0) {
+      tree->GetEntry(0);
+      Double_t firstTimestamp = fineTS / 1000.;  // ps to ns
+
+      // Timestamp reset detection with 10-second threshold
+      // Electronics/DAQ can have small timing variations, so only consider it a reset
+      // if timestamp jumped backwards by more than 10 seconds
+      constexpr Double_t TIMESTAMP_RESET_THRESHOLD = 10e9;  // 10 seconds in ns
+
+      if ((firstTimestamp + TIMESTAMP_RESET_THRESHOLD) < lastFileLastTimestamp) {
+        // Significant timestamp jump backwards - new acquisition detected
+        overlapBuffer.clear();
+        std::lock_guard<std::mutex> lock(fFileListMutex);
+        std::cout << "Thread " << threadID
+                  << ": Timestamp reset detected (new acquisition), clearing overlap buffer"
+                  << std::endl;
+        std::cout << "         Previous file last timestamp: " << lastFileLastTimestamp / 1e9 << " s"
+                  << std::endl;
+        std::cout << "         Current file first timestamp: " << firstTimestamp / 1e9 << " s"
+                  << std::endl;
+      }
+    }
+
     // CHUNKED PROCESSING: Process file in chunks to limit memory usage
     // Instead of loading all 174M entries (6.9 GB), process 10M at a time (350 MB)
-    std::vector<std::unique_ptr<RawData_t>> overlapBuffer;  // Events from previous chunk
-
-    const Long64_t numChunks = (nEntries + CHUNK_SIZE - 1) / CHUNK_SIZE;
-
-    {
-      std::lock_guard<std::mutex> lock(fFileListMutex);
-      std::cout << "Thread " << threadID << ": Processing " << nEntries
-                << " entries in " << numChunks << " chunks" << std::endl;
-    }
 
     for (Long64_t chunkStart = 0; chunkStart < nEntries; chunkStart += CHUNK_SIZE) {
       // Check if cancelled
@@ -273,7 +297,17 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
 
       // Load this chunk from file
       std::vector<std::unique_ptr<RawData_t>> rawDataVec;
-      rawDataVec.reserve(readEnd - readStart);
+
+      // Merge overlap from previous chunk/file for cross-file continuity
+      if (!overlapBuffer.empty()) {
+        rawDataVec.reserve((readEnd - readStart) + overlapBuffer.size());
+        rawDataVec.insert(rawDataVec.end(),
+                         std::make_move_iterator(overlapBuffer.begin()),
+                         std::make_move_iterator(overlapBuffer.end()));
+        overlapBuffer.clear();
+      } else {
+        rawDataVec.reserve(readEnd - readStart);
+      }
 
       for (Long64_t iEve = readStart; iEve < readEnd; iEve++) {
         tree->GetEntry(iEve);
@@ -298,7 +332,7 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
         }
       }
 
-      // Sort chunk
+      // Sort merged data (overlap from previous chunk/file + new chunk)
       std::sort(rawDataVec.begin(), rawDataVec.end(),
                 [](const std::unique_ptr<RawData_t> &a,
                    const std::unique_ptr<RawData_t> &b) {
@@ -400,19 +434,34 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
       }
     }
 
+      // Save last OVERLAP_SIZE events for next chunk/file (cross-file continuity)
+      overlapBuffer.clear();
+      Long64_t overlapStart = (rawDataVec.size() > OVERLAP_SIZE) ?
+                              (rawDataVec.size() - OVERLAP_SIZE) : 0;
+
+      for (Long64_t i = overlapStart; i < rawDataVec.size(); i++) {
+        // Deep copy for overlap buffer
+        overlapBuffer.emplace_back(
+          std::make_unique<RawData_t>(*rawDataVec[i])
+        );
+      }
+
       // Clear this chunk's data and release memory
       rawDataVec.clear();
       rawDataVec.shrink_to_fit();
-
-      {
-        std::lock_guard<std::mutex> lock(fFileListMutex);
-        std::cout << "Thread " << threadID << ": Chunk "
-                  << (chunkStart / CHUNK_SIZE + 1) << "/" << numChunks
-                  << " complete" << std::endl;
-      }
     }  // End chunk loop
+    // Note: overlapBuffer is NOT cleared here to maintain cross-file continuity
 
-    overlapBuffer.clear();  // Clear overlap buffer between files
+    // Update last timestamp from this file for next file's acquisition restart detection
+    if (!overlapBuffer.empty()) {
+      lastFileLastTimestamp = overlapBuffer.back()->fineTS;
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(fFileListMutex);
+      std::cout << "Thread " << threadID << ": Finished processing "
+                << fileName << std::endl;
+    }
   }
 
   outputFile->cd();
