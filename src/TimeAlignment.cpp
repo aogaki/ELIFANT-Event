@@ -252,44 +252,60 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
     tree->SetBranchStatus("FineTS", kTRUE);
     tree->SetBranchAddress("FineTS", &fineTS);
 
-    const uint64_t nEvents = tree->GetEntries();
-    std::vector<std::tuple<UChar_t, UChar_t, Double_t>> dataVec;
-    dataVec.reserve(nEvents);
-    for (int64_t iEve = 0; iEve < nEvents; iEve++) {
-      // Check if cancelled periodically (every 10000 events)
-      if (iEve % 10000 == 0 && fCancelled.load()) {
-        std::lock_guard<std::mutex> lock(fFileListMutex);
-        std::cout << "Thread " << threadID << " cancelled by user after processing "
-                  << iEve << "/" << nEvents << " events." << std::endl;
-        return;  // file will be automatically closed and deleted
-      }
-      tree->GetEntry(iEve);
+    const int64_t nEvents = tree->GetEntries();
 
-      // Bounds checking to prevent segmentation fault
-      if (mod >= fChSettingsVec.size() || ch >= fChSettingsVec[mod].size()) {
-        continue;
-      }
+    // CHUNKED PROCESSING: Process file in chunks to limit memory usage
+    // Instead of loading all entries at once, process 10M at a time
+    const int64_t numChunks = (nEvents + CHUNK_SIZE - 1) / CHUNK_SIZE;
 
-      auto threshold = fChSettingsVec[mod][ch].thresholdADC;
-      if (chargeLong > threshold) {
-#ifdef USE_MUTEX_APPROACH
-        {
-          std::lock_guard<std::mutex> lock(fHistogramMutex);
-          fHistoADC[mod][ch]->Fill(chargeLong);
-        }
-#else
-        fThreadHistograms[threadID].histoADC[mod][ch]->Fill(chargeLong);
-#endif
-        dataVec.emplace_back(mod, ch, fineTS / 1000.);  // ps -> ns
-      }
+    {
+      std::lock_guard<std::mutex> lock(fFileListMutex);
+      std::cout << "Thread " << threadID << ": Processing " << nEvents
+                << " entries in " << numChunks << " chunks" << std::endl;
     }
-    // file will be automatically closed and deleted at end of scope
 
-    std::sort(dataVec.begin(), dataVec.end(), [](const auto &a, const auto &b) {
-      return std::get<2>(a) < std::get<2>(b);
-    });
+    for (int64_t chunkStart = 0; chunkStart < nEvents; chunkStart += CHUNK_SIZE) {
+      // Check if cancelled
+      if (fCancelled.load()) {
+        std::lock_guard<std::mutex> lock(fFileListMutex);
+        std::cout << "Thread " << threadID << " cancelled during chunked processing." << std::endl;
+        return;
+      }
 
-    const auto nGoodEvents = dataVec.size();
+      int64_t chunkEnd = std::min(nEvents, chunkStart + CHUNK_SIZE);
+
+      // Load this chunk from file
+      std::vector<std::tuple<UChar_t, UChar_t, Double_t>> dataVec;
+      dataVec.reserve(chunkEnd - chunkStart);
+
+      for (int64_t iEve = chunkStart; iEve < chunkEnd; iEve++) {
+        tree->GetEntry(iEve);
+
+        // Bounds checking to prevent segmentation fault
+        if (mod >= fChSettingsVec.size() || ch >= fChSettingsVec[mod].size()) {
+          continue;
+        }
+
+        auto threshold = fChSettingsVec[mod][ch].thresholdADC;
+        if (chargeLong > threshold) {
+#ifdef USE_MUTEX_APPROACH
+          {
+            std::lock_guard<std::mutex> lock(fHistogramMutex);
+            fHistoADC[mod][ch]->Fill(chargeLong);
+          }
+#else
+          fThreadHistograms[threadID].histoADC[mod][ch]->Fill(chargeLong);
+#endif
+          dataVec.emplace_back(mod, ch, fineTS / 1000.);  // ps -> ns
+        }
+      }
+
+      // Sort this chunk
+      std::sort(dataVec.begin(), dataVec.end(), [](const auto &a, const auto &b) {
+        return std::get<2>(a) < std::get<2>(b);
+      });
+
+      const auto nGoodEvents = dataVec.size();
     for (int64_t iEve = 0; iEve < nGoodEvents; iEve++) {
       auto mod = std::get<0>(dataVec[iEve]);
       auto ch = std::get<1>(dataVec[iEve]);
@@ -342,6 +358,19 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
         }
       }
     }
+
+      // Clear this chunk's data and release memory
+      dataVec.clear();
+      dataVec.shrink_to_fit();
+
+      {
+        std::lock_guard<std::mutex> lock(fFileListMutex);
+        std::cout << "Thread " << threadID << ": Chunk "
+                  << (chunkStart / CHUNK_SIZE + 1) << "/" << numChunks
+                  << " complete" << std::endl;
+      }
+    }  // End chunk loop
+    // file will be automatically closed and deleted at end of scope
   }
 
   {

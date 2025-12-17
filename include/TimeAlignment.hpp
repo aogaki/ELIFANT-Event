@@ -44,6 +44,9 @@ class TimeAlignment
   std::mutex fFileListMutex;
   std::mutex fHistogramMutex;  // For mutex-based approach
 
+  // Chunked processing configuration to limit memory usage
+  static constexpr int64_t CHUNK_SIZE = 10000000;  // 10M entries per chunk
+
   // Thread-local histograms for parallel filling
   struct ThreadHistograms {
     std::vector<std::vector<std::unique_ptr<TH2D>>> histoTime;
