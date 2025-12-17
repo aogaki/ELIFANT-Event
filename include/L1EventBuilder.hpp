@@ -50,6 +50,10 @@ class L1EventBuilder
   std::mutex fFileListMutex;
   std::atomic<bool> fCancelled{false};
 
+  // Chunked processing configuration to limit memory usage
+  static constexpr Long64_t CHUNK_SIZE = 10000000;  // 10M entries per chunk
+  static constexpr Long64_t OVERLAP_SIZE = 10000;    // 10k entries overlap for coincidence window
+
   void DataReader(int threadID, std::vector<std::string> fileList);
 };
 

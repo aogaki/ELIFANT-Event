@@ -246,36 +246,64 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
     tree->SetBranchAddress("ChargeShort", &chargeShort);
 
     const auto nEntries = tree->GetEntries();
-    std::vector<std::unique_ptr<RawData_t>> rawDataVec;
-    rawDataVec.reserve(nEntries);
-    for (Long64_t iEve = 0; iEve < nEntries; iEve++) {
-      tree->GetEntry(iEve);
 
-      // Bounds checking to prevent segmentation fault
-      if (mod >= fChSettingsVec.size() || ch >= fChSettingsVec[mod].size()) {
-        continue;
-      }
+    // CHUNKED PROCESSING: Process file in chunks to limit memory usage
+    // Instead of loading all 174M entries (6.9 GB), process 10M at a time (350 MB)
+    std::vector<std::unique_ptr<RawData_t>> overlapBuffer;  // Events from previous chunk
 
-      // Check if mod/ch are within bounds for time settings array
-      if (mod >= fTimeSettingsVec[fRefMod][fRefCh].size() ||
-          ch >= fTimeSettingsVec[fRefMod][fRefCh][mod].size()) {
-        continue;
-      }
+    const Long64_t numChunks = (nEntries + CHUNK_SIZE - 1) / CHUNK_SIZE;
 
-      if (chargeLong > fChSettingsVec[mod][ch].thresholdADC) {
-        auto ts = fineTS / 1000.;  // ps to ns
-        ts -= fTimeSettingsVec[fRefMod][fRefCh][mod][ch];
-        auto rawData =
-            new RawData_t(false, mod, ch, chargeLong, chargeShort, ts);
-        rawDataVec.emplace_back(rawData);
-      }
+    {
+      std::lock_guard<std::mutex> lock(fFileListMutex);
+      std::cout << "Thread " << threadID << ": Processing " << nEntries
+                << " entries in " << numChunks << " chunks" << std::endl;
     }
-    // file will be automatically closed and deleted
-    std::sort(rawDataVec.begin(), rawDataVec.end(),
-              [](const std::unique_ptr<RawData_t> &a,
-                 const std::unique_ptr<RawData_t> &b) {
-                return a->fineTS < b->fineTS;
-              });
+
+    for (Long64_t chunkStart = 0; chunkStart < nEntries; chunkStart += CHUNK_SIZE) {
+      // Check if cancelled
+      if (fCancelled.load()) {
+        std::lock_guard<std::mutex> lock(fFileListMutex);
+        std::cout << "Thread " << threadID << " cancelled during chunked processing." << std::endl;
+        break;
+      }
+
+      // Calculate chunk boundaries with overlap for coincidence window
+      Long64_t readStart = (chunkStart > OVERLAP_SIZE) ? (chunkStart - OVERLAP_SIZE) : 0;
+      Long64_t readEnd = std::min(nEntries, chunkStart + CHUNK_SIZE + OVERLAP_SIZE);
+
+      // Load this chunk from file
+      std::vector<std::unique_ptr<RawData_t>> rawDataVec;
+      rawDataVec.reserve(readEnd - readStart);
+
+      for (Long64_t iEve = readStart; iEve < readEnd; iEve++) {
+        tree->GetEntry(iEve);
+
+        // Bounds checking to prevent segmentation fault
+        if (mod >= fChSettingsVec.size() || ch >= fChSettingsVec[mod].size()) {
+          continue;
+        }
+
+        // Check if mod/ch are within bounds for time settings array
+        if (mod >= fTimeSettingsVec[fRefMod][fRefCh].size() ||
+            ch >= fTimeSettingsVec[fRefMod][fRefCh][mod].size()) {
+          continue;
+        }
+
+        if (chargeLong > fChSettingsVec[mod][ch].thresholdADC) {
+          auto ts = fineTS / 1000.;  // ps to ns
+          ts -= fTimeSettingsVec[fRefMod][fRefCh][mod][ch];
+          auto rawData =
+              new RawData_t(false, mod, ch, chargeLong, chargeShort, ts);
+          rawDataVec.emplace_back(rawData);
+        }
+      }
+
+      // Sort chunk
+      std::sort(rawDataVec.begin(), rawDataVec.end(),
+                [](const std::unique_ptr<RawData_t> &a,
+                   const std::unique_ptr<RawData_t> &b) {
+                  return a->fineTS < b->fineTS;
+                });
 
     const auto nRawData = rawDataVec.size();
 
@@ -372,7 +400,19 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
       }
     }
 
-    rawDataVec.clear();
+      // Clear this chunk's data and release memory
+      rawDataVec.clear();
+      rawDataVec.shrink_to_fit();
+
+      {
+        std::lock_guard<std::mutex> lock(fFileListMutex);
+        std::cout << "Thread " << threadID << ": Chunk "
+                  << (chunkStart / CHUNK_SIZE + 1) << "/" << numChunks
+                  << " complete" << std::endl;
+      }
+    }  // End chunk loop
+
+    overlapBuffer.clear();  // Clear overlap buffer between files
   }
 
   outputFile->cd();
