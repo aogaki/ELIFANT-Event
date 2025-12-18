@@ -258,12 +258,6 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
     // Instead of loading all entries at once, process 10M at a time
     const int64_t numChunks = (nEvents + CHUNK_SIZE - 1) / CHUNK_SIZE;
 
-    {
-      std::lock_guard<std::mutex> lock(fFileListMutex);
-      std::cout << "Thread " << threadID << ": Processing " << nEvents
-                << " entries in " << numChunks << " chunks" << std::endl;
-    }
-
     for (int64_t chunkStart = 0; chunkStart < nEvents; chunkStart += CHUNK_SIZE) {
       // Check if cancelled
       if (fCancelled.load()) {
@@ -362,13 +356,6 @@ void DELILA::TimeAlignment::DataProcess(int threadID)
       // Clear this chunk's data and release memory
       dataVec.clear();
       dataVec.shrink_to_fit();
-
-      {
-        std::lock_guard<std::mutex> lock(fFileListMutex);
-        std::cout << "Thread " << threadID << ": Chunk "
-                  << (chunkStart / CHUNK_SIZE + 1) << "/" << numChunks
-                  << " complete" << std::endl;
-      }
     }  // End chunk loop
     // file will be automatically closed and deleted at end of scope
   }
