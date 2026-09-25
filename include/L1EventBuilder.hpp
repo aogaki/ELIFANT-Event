@@ -52,7 +52,10 @@ class L1EventBuilder
 
   // Chunked processing configuration to limit memory usage
   static constexpr Long64_t CHUNK_SIZE = 10000000;  // 10M entries per chunk
-  static constexpr Long64_t OVERLAP_SIZE = 10000;    // 10k entries overlap for coincidence window
+  // Context (entries) on each side of a trigger candidate. It must cover the
+  // time interleave of consecutive raw files: up to 227 ms = 165k entries
+  // measured (run 110, segments 0-11), so 1M leaves a margin.
+  static constexpr Long64_t OVERLAP_SIZE = 1000000;
 
   void DataReader(int threadID, std::vector<std::string> fileList);
 };

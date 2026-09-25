@@ -11,6 +11,7 @@
 #include <csignal>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <nlohmann/json.hpp>
 
 // Global pointer for signal handler access
@@ -195,13 +196,149 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
   outputTree->Branch("EventDataVec", &eventData.eventDataVec);
   outputTree->SetDirectory(outputFile.get());
 
-  // Overlap buffer for cross-file continuity
-  // Maintains events from end of previous chunk/file for coincidence detection
-  std::vector<std::unique_ptr<RawData_t>> overlapBuffer;
+  // The files of this thread form ONE continuous stream (entries of the files
+  // concatenated), broken only by a timestamp reset. Each hit remembers its
+  // stream entry index. A hit is evaluated as a trigger candidate exactly once:
+  // in the pass where ownStart <= entry < ownEnd. The OVERLAP_SIZE entries on
+  // either side of a candidate are context only (dedup check + event content).
+  // At the end of every chunk (and so of every file) the last OVERLAP_SIZE
+  // entries are deferred to the next pass, where they get their forward
+  // context; the stream end is flushed.
+  struct StreamHit {
+    RawData_t data;
+    Long64_t entry;  // index in the thread's stream
+  };
+  std::vector<StreamHit> hitVec;  // carried context + deferred hits + chunk
+  hitVec.reserve(CHUNK_SIZE + 2 * OVERLAP_SIZE);  // carry <= 2 * OVERLAP_SIZE
+  Long64_t streamOffset = 0;      // stream index of the current file's entry 0
+  Long64_t ownStart = 0;          // first stream entry not yet evaluated
+
+  // Self-check of the context assumption: every hit within the coincidence
+  // window of a candidate lies within OVERLAP_SIZE entries of it.
+  constexpr Double_t kNoTime = std::numeric_limits<Double_t>::lowest();
+  Double_t lastCandidateTime = kNoTime;  // latest evaluated candidate
+  Double_t lastDroppedTime = kNoTime;    // latest hit dropped from the carry
+  Long64_t nOutOfContext = 0;
+
+  auto buildEvents = [&](Long64_t ownEnd) {
+    const Long64_t nHits = hitVec.size();
+    for (Long64_t iEve = 0; iEve < nHits; iEve++) {
+      auto &rawData = hitVec[iEve].data;
+      auto trgMod = rawData.mod;
+      auto trgCh = rawData.ch;
+      auto entry = hitVec[iEve].entry;
+
+      if (entry >= ownStart && entry < ownEnd &&
+          fChSettingsVec[trgMod][trgCh].isEventTrigger) {
+        if (rawData.fineTS - fCoincidenceWindow <= lastDroppedTime) {
+          nOutOfContext++;
+        }
+        lastCandidateTime = std::max(lastCandidateTime, rawData.fineTS);
+
+        auto triggerID = fChSettingsVec[trgMod][trgCh].ID;
+        eventData.Clear();
+        eventData.triggerTime = rawData.fineTS;
+        eventData.eventDataVec->emplace_back(
+            rawData.isWithAC, trgMod, trgCh, rawData.chargeLong,
+            rawData.chargeShort, rawData.fineTS - eventData.triggerTime);
+        bool fillFlag = true;
+
+        // Precedence: the lower ID wins; for an equal ID the earlier hit wins.
+        for (auto jEve = iEve + 1; (jEve < nHits) && fillFlag; jEve++) {
+          auto &rawData2 = hitVec[jEve].data;
+          auto ts = rawData2.fineTS - eventData.triggerTime;
+          if (ts > fCoincidenceWindow) {
+            break;
+          }
+          auto mod = rawData2.mod;
+          auto ch = rawData2.ch;
+          auto id = fChSettingsVec[mod][ch].ID;
+          auto isEventTrigger = fChSettingsVec[mod][ch].isEventTrigger;
+          if (isEventTrigger && id < triggerID && ts < fCoincidenceWindow) {
+            // a later trigger with a lower ID wins: skip this event
+            fillFlag = false;
+            break;
+          }
+          auto hit = rawData2;
+          hit.fineTS -= eventData.triggerTime;
+          eventData.eventDataVec->emplace_back(hit.isWithAC, mod, ch,
+                                               hit.chargeLong, hit.chargeShort,
+                                               hit.fineTS);
+        }
+        for (auto jEve = iEve - 1; (jEve >= 0) && fillFlag; jEve--) {
+          auto &rawData2 = hitVec[jEve].data;
+          auto ts = rawData2.fineTS - eventData.triggerTime;
+          if (ts < -fCoincidenceWindow) {
+            break;
+          }
+          auto mod = rawData2.mod;
+          auto ch = rawData2.ch;
+          auto id = fChSettingsVec[mod][ch].ID;
+          auto isEventTrigger = fChSettingsVec[mod][ch].isEventTrigger;
+          if (isEventTrigger && id <= triggerID && ts > -fCoincidenceWindow) {
+            // an earlier trigger with a lower or equal ID wins: skip this event
+            fillFlag = false;
+            break;
+          }
+          auto hit = rawData2;
+          hit.fineTS -= eventData.triggerTime;
+          eventData.eventDataVec->emplace_back(hit.isWithAC, mod, ch,
+                                               hit.chargeLong, hit.chargeShort,
+                                               hit.fineTS);
+        }
+
+        if (fillFlag) {
+          std::sort(eventData.eventDataVec->begin() + 1,
+                    eventData.eventDataVec->end(),
+                    [](const RawData_t &a, const RawData_t &b) {
+                      return a.fineTS < b.fineTS;
+                    });
+
+          // Check AC
+          for (auto &hit : *(eventData.eventDataVec)) {
+            auto mod = hit.mod;
+            auto ch = hit.ch;
+
+            // Bounds checking to prevent segmentation fault
+            if (mod >= fChSettingsVec.size() || ch >= fChSettingsVec[mod].size()) {
+              continue;
+            }
+
+            if (fChSettingsVec[mod][ch].hasAC) {
+              auto acMod = fChSettingsVec[mod][ch].ACMod;
+              auto acCh = fChSettingsVec[mod][ch].ACCh;
+              for (auto &ac : *(eventData.eventDataVec)) {
+                if (ac.mod == acMod && ac.ch == acCh &&
+                    fabs(ac.fineTS) < fCoincidenceWindow) {
+                  hit.isWithAC = true;
+                  break;
+                }
+              }
+            }
+          }
+
+          outputTree->Fill();
+        }
+        eventData.Clear();
+      }
+    }
+    ownStart = std::max(ownStart, ownEnd);
+
+    // Keep OVERLAP_SIZE entries of backward context for the next candidates
+    const Long64_t keepFrom = ownStart - OVERLAP_SIZE;
+    auto keepEnd = std::remove_if(hitVec.begin(), hitVec.end(),
+                                  [&](const StreamHit &h) {
+                                    if (h.entry >= keepFrom) return false;
+                                    lastDroppedTime =
+                                        std::max(lastDroppedTime, h.data.fineTS);
+                                    return true;
+                                  });
+    hitVec.erase(keepEnd, hitVec.end());
+  };
 
   // Track last timestamp to detect acquisition restarts (timestamp resets)
   // If first event of new file has earlier timestamp than last event of previous file,
-  // it indicates a new acquisition and we should clear the overlap buffer
+  // it indicates a new acquisition: the stream is flushed and restarted
   Double_t lastFileLastTimestamp = -1.0;
 
   for (auto iFile = 0; iFile < fileList.size(); iFile++) {
@@ -267,11 +404,15 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
       constexpr Double_t TIMESTAMP_RESET_THRESHOLD = 10e9;  // 10 seconds in ns
 
       if ((firstTimestamp + TIMESTAMP_RESET_THRESHOLD) < lastFileLastTimestamp) {
-        // Significant timestamp jump backwards - new acquisition detected
-        overlapBuffer.clear();
+        // Significant timestamp jump backwards - new acquisition detected:
+        // flush the old stream (no forward context follows) and restart
+        buildEvents(streamOffset);
+        hitVec.clear();
+        lastCandidateTime = kNoTime;
+        lastDroppedTime = kNoTime;
         std::lock_guard<std::mutex> lock(fFileListMutex);
         std::cout << "Thread " << threadID
-                  << ": Timestamp reset detected (new acquisition), clearing overlap buffer"
+                  << ": Timestamp reset detected (new acquisition), flushing the previous stream"
                   << std::endl;
         std::cout << "         Previous file last timestamp: " << lastFileLastTimestamp / 1e9 << " s"
                   << std::endl;
@@ -295,28 +436,13 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
         break;
       }
 
-      // Calculate chunk boundaries with overlap for coincidence window
-      Long64_t readStart = (chunkStart > OVERLAP_SIZE) ? (chunkStart - OVERLAP_SIZE) : 0;
-      Long64_t readEnd = std::min(nEntries, chunkStart + CHUNK_SIZE + OVERLAP_SIZE);
+      // Each entry is read once; the context comes from the carried hits
+      Long64_t chunkEnd = std::min(nEntries, chunkStart + CHUNK_SIZE);
 
       // === Timing: Start Read Phase ===
       auto readPhaseStart = std::chrono::high_resolution_clock::now();
 
-      // Load this chunk from file
-      std::vector<std::unique_ptr<RawData_t>> rawDataVec;
-
-      // Merge overlap from previous chunk/file for cross-file continuity
-      if (!overlapBuffer.empty()) {
-        rawDataVec.reserve((readEnd - readStart) + overlapBuffer.size());
-        rawDataVec.insert(rawDataVec.end(),
-                         std::make_move_iterator(overlapBuffer.begin()),
-                         std::make_move_iterator(overlapBuffer.end()));
-        overlapBuffer.clear();
-      } else {
-        rawDataVec.reserve(readEnd - readStart);
-      }
-
-      for (Long64_t iEve = readStart; iEve < readEnd; iEve++) {
+      for (Long64_t iEve = chunkStart; iEve < chunkEnd; iEve++) {
         tree->GetEntry(iEve);
 
         // Bounds checking to prevent segmentation fault
@@ -333,143 +459,41 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
         if (chargeLong > fChSettingsVec[mod][ch].thresholdADC) {
           auto ts = fineTS / 1000.;  // ps to ns
           ts -= fTimeSettingsVec[fRefMod][fRefCh][mod][ch];
-          auto rawData =
-              new RawData_t(false, mod, ch, chargeLong, chargeShort, ts);
-          rawDataVec.emplace_back(rawData);
+          if (ts - fCoincidenceWindow <= lastCandidateTime) {
+            nOutOfContext++;  // arrived after a candidate it belongs to
+          }
+          hitVec.push_back(
+              {RawData_t(false, mod, ch, chargeLong, chargeShort, ts),
+               streamOffset + iEve});
         }
       }
 
-      // Sort merged data (overlap from previous chunk/file + new chunk)
-      std::sort(rawDataVec.begin(), rawDataVec.end(),
-                [](const std::unique_ptr<RawData_t> &a,
-                   const std::unique_ptr<RawData_t> &b) {
-                  return a->fineTS < b->fineTS;
+      // Sort by time; equal times keep the stream order
+      std::sort(hitVec.begin(), hitVec.end(),
+                [](const StreamHit &a, const StreamHit &b) {
+                  if (a.data.fineTS != b.data.fineTS) {
+                    return a.data.fineTS < b.data.fineTS;
+                  }
+                  return a.entry < b.entry;
                 });
 
       // === Timing: End Read Phase, Start Process Phase ===
       auto readPhaseEnd = std::chrono::high_resolution_clock::now();
       totalReadTime += std::chrono::duration<double>(readPhaseEnd - readPhaseStart).count();
 
-    const auto nRawData = rawDataVec.size();
-
-    for (auto iEve = 0; iEve < nRawData; iEve++) {
-      auto &rawData = rawDataVec[iEve];
-      auto trgMod = rawData->mod;
-      auto trgCh = rawData->ch;
-
-      if (fChSettingsVec[trgMod][trgCh].isEventTrigger) {
-        auto triggerID = fChSettingsVec[trgMod][trgCh].ID;
-        eventData.Clear();
-        eventData.triggerTime = rawData->fineTS;
-        eventData.eventDataVec->emplace_back(
-            rawData->isWithAC, trgMod, trgCh, rawData->chargeLong,
-            rawData->chargeShort, rawData->fineTS - eventData.triggerTime);
-        bool fillFlag = true;
-
-        for (auto jEve = iEve + 1; (jEve < nRawData) && fillFlag; jEve++) {
-          auto &rawData2 = rawDataVec[jEve];
-          auto ts = rawData2->fineTS - eventData.triggerTime;
-          if (ts > fCoincidenceWindow) {
-            break;
-          }
-          auto mod = rawData2->mod;
-          auto ch = rawData2->ch;
-          auto id = fChSettingsVec[mod][ch].ID;
-          auto isEventTrigger = fChSettingsVec[mod][ch].isEventTrigger;
-          if (isEventTrigger && id >= triggerID && ts < fCoincidenceWindow) {
-            // skip this event
-            fillFlag = false;
-            break;
-          }
-          auto hit = *rawData2;
-          hit.fineTS -= eventData.triggerTime;
-          eventData.eventDataVec->emplace_back(hit.isWithAC, mod, ch,
-                                               hit.chargeLong, hit.chargeShort,
-                                               hit.fineTS);
-        }
-        for (auto jEve = iEve - 1; (jEve >= 0) && fillFlag; jEve--) {
-          auto &rawData2 = rawDataVec[jEve];
-          auto ts = rawData2->fineTS - eventData.triggerTime;
-          if (ts < -fCoincidenceWindow) {
-            break;
-          }
-          auto mod = rawData2->mod;
-          auto ch = rawData2->ch;
-          auto id = fChSettingsVec[mod][ch].ID;
-          auto isEventTrigger = fChSettingsVec[mod][ch].isEventTrigger;
-          if (isEventTrigger && id >= triggerID && ts > -fCoincidenceWindow) {
-            // skip this event
-            fillFlag = false;
-            break;
-          }
-          auto hit = *rawData2;
-          hit.fineTS -= eventData.triggerTime;
-          eventData.eventDataVec->emplace_back(hit.isWithAC, mod, ch,
-                                               hit.chargeLong, hit.chargeShort,
-                                               hit.fineTS);
-        }
-
-        if (fillFlag) {
-          std::sort(eventData.eventDataVec->begin() + 1,
-                    eventData.eventDataVec->end(),
-                    [](const RawData_t &a, const RawData_t &b) {
-                      return a.fineTS < b.fineTS;
-                    });
-
-          // Check AC
-          for (auto &hit : *(eventData.eventDataVec)) {
-            auto mod = hit.mod;
-            auto ch = hit.ch;
-
-            // Bounds checking to prevent segmentation fault
-            if (mod >= fChSettingsVec.size() || ch >= fChSettingsVec[mod].size()) {
-              continue;
-            }
-
-            if (fChSettingsVec[mod][ch].hasAC) {
-              auto acMod = fChSettingsVec[mod][ch].ACMod;
-              auto acCh = fChSettingsVec[mod][ch].ACCh;
-              for (auto &ac : *(eventData.eventDataVec)) {
-                if (ac.mod == acMod && ac.ch == acCh &&
-                    fabs(ac.fineTS) < fCoincidenceWindow) {
-                  hit.isWithAC = true;
-                  break;
-                }
-              }
-            }
-          }
-
-          outputTree->Fill();
-        }
-        eventData.Clear();
-      }
-    }
-
-      // Save last OVERLAP_SIZE events for next chunk/file (cross-file continuity)
-      overlapBuffer.clear();
-      Long64_t overlapStart = (rawDataVec.size() > OVERLAP_SIZE) ?
-                              (rawDataVec.size() - OVERLAP_SIZE) : 0;
-
-      for (Long64_t i = overlapStart; i < rawDataVec.size(); i++) {
-        // Deep copy for overlap buffer
-        overlapBuffer.emplace_back(
-          std::make_unique<RawData_t>(*rawDataVec[i])
-        );
-      }
-
-      // Clear this chunk's data and release memory
-      rawDataVec.clear();
-      rawDataVec.shrink_to_fit();
+      // Evaluate the owned candidates; defer the last OVERLAP_SIZE entries
+      buildEvents(std::max(ownStart, streamOffset + chunkEnd - OVERLAP_SIZE));
 
       // === Timing: End Process Phase ===
       auto processPhaseEnd = std::chrono::high_resolution_clock::now();
       totalProcessTime += std::chrono::duration<double>(processPhaseEnd - readPhaseEnd).count();
     }  // End chunk loop
-    // Note: overlapBuffer is NOT cleared here to maintain cross-file continuity
+    // Note: hitVec is NOT cleared here to maintain cross-file continuity
+    streamOffset += nEntries;
 
     // Update last timestamp from this file for next file's acquisition restart detection
-    if (!overlapBuffer.empty()) {
-      lastFileLastTimestamp = overlapBuffer.back()->fineTS;
+    if (!hitVec.empty()) {
+      lastFileLastTimestamp = hitVec.back().data.fineTS;
     }
 
     {
@@ -482,6 +506,17 @@ void DELILA::L1EventBuilder::DataReader(int threadID,
                 << (totalProcessTime / (totalReadTime + totalProcessTime) * 100) << "%)" << std::endl;
       std::cout << "         Total time:   " << (totalReadTime + totalProcessTime) << " s" << std::endl;
     }
+  }
+
+  // End of the stream: flush the deferred hits
+  buildEvents(streamOffset);
+  if (nOutOfContext > 0) {
+    std::lock_guard<std::mutex> lock(fFileListMutex);
+    std::cerr << "Thread " << threadID << ": WARNING: " << nOutOfContext
+              << " hits lie out of time order by more than OVERLAP_SIZE ("
+              << OVERLAP_SIZE << ") entries;"
+              << " events near chunk/file boundaries may be incomplete."
+              << std::endl;
   }
 
   outputFile->cd();
